@@ -14,6 +14,8 @@ class CallReference:
     kwargs: List[str] = field(default_factory=list)
     lineno: int = 0
     caller: Optional[str] = None
+    has_vararg: bool = False
+    has_kwarg: bool = False
 
 
 @dataclass

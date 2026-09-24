@@ -48,3 +48,6 @@ Thumbs.db
 
 # Code Oracle Cache
 .code_oracle/
+
+# Knowledge Graph
+graphify-out/

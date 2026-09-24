@@ -252,6 +252,8 @@ class WorkspaceIndexer:
                     "kwargs": c.kwargs,
                     "lineno": c.lineno,
                     "caller": c.caller,
+                    "has_vararg": c.has_vararg,
+                    "has_kwarg": c.has_kwarg,
                 }
                 for c in s.calls
             ],
@@ -279,6 +281,8 @@ class WorkspaceIndexer:
                 kwargs=c.get("kwargs", []),
                 lineno=c.get("lineno", 0),
                 caller=c.get("caller"),
+                has_vararg=c.get("has_vararg", False),
+                has_kwarg=c.get("has_kwarg", False),
             )
             for c in d.get("calls", [])
         ]
@@ -349,6 +353,66 @@ class WorkspaceIndexer:
                 if imp.module:
                     self._importers.setdefault(f"{imp.module}.{imp.name}", []).append(imp)
 
+    def resolve_import_to_file(
+        self, imp: ImportReference, current_file: str
+    ) -> Optional[str]:
+        """
+        Resolve an ImportReference from current_file to a concrete file path in the workspace.
+        Handles relative imports (level > 0) and absolute workspace imports (level == 0).
+        """
+        available_files = set(self._file_cache.keys())
+        cur_p = Path(current_file)
+        cur_dir = cur_p.parent
+
+        candidates = []
+
+        if imp.level > 0:
+            # Relative import
+            target_dir = cur_dir
+            for _ in range(imp.level - 1):
+                target_dir = target_dir.parent
+
+            if imp.module:
+                rel_mod = imp.module.replace(".", "/")
+                base = target_dir / rel_mod
+                candidates.extend([
+                    f"{base}.py",
+                    f"{base}/__init__.py",
+                    f"{base / imp.name}.py",
+                    f"{base / imp.name}/__init__.py",
+                ])
+            else:
+                candidates.extend([
+                    f"{target_dir / imp.name}.py",
+                    f"{target_dir / imp.name}/__init__.py",
+                    f"{target_dir}/__init__.py",
+                ])
+        else:
+            # Absolute import
+            mods = []
+            if imp.module:
+                mods.append(imp.module)
+                mods.append(f"{imp.module}.{imp.name}")
+            else:
+                mods.append(imp.name)
+
+            for m in mods:
+                rel_m = m.replace(".", "/")
+                candidates.extend([
+                    f"{rel_m}.py",
+                    f"{rel_m}/__init__.py",
+                    f"src/{rel_m}.py",
+                    f"src/{rel_m}/__init__.py",
+                ])
+
+        for cand in candidates:
+            norm = Path(cand).as_posix()
+            if norm.startswith("./"):
+                norm = norm[2:]
+            if norm in available_files:
+                return norm
+        return None
+
     def resolve_callee(
         self, call: CallReference, caller_sym: Optional[Symbol] = None
     ) -> Optional[Symbol]:
@@ -381,6 +445,21 @@ class WorkspaceIndexer:
 
         # 3. Dotted callee: ClassName.method or mod.func
         if "." in callee:
+            if caller_sym:
+                prefix, attr = callee.split(".", 1)
+                caller_file = caller_sym.file_path
+                f_data = self._file_cache.get(caller_file, {})
+                for imp_data in f_data.get("imports", []):
+                    imp = self._deserialize_import(imp_data)
+                    match_alias = imp.asname and imp.asname == prefix
+                    match_name = not imp.asname and (imp.name == prefix or (imp.module and imp.name == prefix))
+                    if match_alias or match_name:
+                        target_f = self.resolve_import_to_file(imp, caller_file)
+                        if target_f:
+                            target_id = f"{target_f}::{attr}"
+                            if target_id in self._definitions:
+                                return self._definitions[target_id]
+
             match = self.get_definition(callee)
             if match:
                 return match
@@ -396,6 +475,19 @@ class WorkspaceIndexer:
             same_file = f"{caller_sym.file_path}::{callee}"
             if same_file in self._definitions:
                 return self._definitions[same_file]
+
+            # Check file imports
+            caller_file = caller_sym.file_path
+            f_data = self._file_cache.get(caller_file, {})
+            for imp_data in f_data.get("imports", []):
+                imp = self._deserialize_import(imp_data)
+                if (imp.asname and imp.asname == callee) or (not imp.asname and imp.name == callee):
+                    target_f = self.resolve_import_to_file(imp, caller_file)
+                    if target_f:
+                        target_id = f"{target_f}::{imp.name}"
+                        if target_id in self._definitions:
+                            return self._definitions[target_id]
+
         return self.get_definition(callee)
 
     def get_definition(self, symbol_id_or_name: str) -> Optional[Symbol]:
@@ -457,9 +549,40 @@ class WorkspaceIndexer:
         """Find all known subclasses inheriting from class_name."""
         return self._subclasses.get(class_name, [])
 
+    def resolve_class_init(self, class_sym: Symbol) -> Optional[Symbol]:
+        """Find __init__ definition for a class, checking inheritance if needed."""
+        # 1. Direct __init__ in class
+        init_id = f"{class_sym.file_path}::{class_sym.qualname}.__init__"
+        if init_id in self._definitions:
+            return self._definitions[init_id]
+        direct_match = self.get_definition(f"{class_sym.qualname}.__init__")
+        if direct_match:
+            return direct_match
+
+        # 2. Check base classes
+        for base_name in getattr(class_sym, "bases", []):
+            base_sym = self.get_definition(base_name)
+            if base_sym and base_sym.kind == "class":
+                base_init = self.resolve_class_init(base_sym)
+                if base_init:
+                    return base_init
+        return None
+
     def get_file_symbols(self, file_path: str) -> List[Symbol]:
         """Return all symbols in a given file."""
-        clean_path = str(file_path).replace("\\", "/")
+        p = Path(file_path)
+        if p.is_absolute():
+            try:
+                clean_path = str(p.resolve().relative_to(self.workspace_root.resolve())).replace("\\", "/")
+            except ValueError:
+                clean_path = str(file_path).replace("\\", "/")
+        else:
+            full_p = (self.workspace_root / file_path).resolve()
+            try:
+                clean_path = str(full_p.relative_to(self.workspace_root.resolve())).replace("\\", "/")
+            except ValueError:
+                clean_path = str(file_path).replace("\\", "/")
+
         cached = self._file_cache.get(clean_path)
         if not cached:
             return []

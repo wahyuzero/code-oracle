@@ -61,11 +61,15 @@ def cmd_verify(args: argparse.Namespace) -> int:
     file_path = args.file
     patch_content = ""
 
-    if args.patch:
+    if args.patch == "-":
+        patch_content = sys.stdin.read()
+    elif args.patch:
         # Check if patch is a file path or direct string
         p_path = Path(args.patch)
         if p_path.is_file():
             patch_content = p_path.read_text(encoding="utf-8")
+        elif args.workspace and (Path(args.workspace) / args.patch).is_file():
+            patch_content = (Path(args.workspace) / args.patch).read_text(encoding="utf-8")
         else:
             patch_content = args.patch
     elif not sys.stdin.isatty():
@@ -123,7 +127,11 @@ def cmd_slice(args: argparse.Namespace) -> int:
             symbol = matches[0]
 
     if not symbol:
-        print(f"Error: Symbol '{args.symbol}' not found in {args.file} or workspace.", file=sys.stderr)
+        err_msg = f"Error: Symbol '{args.symbol}' not found in {args.file} or workspace."
+        if getattr(args, "json", False):
+            print(json.dumps({"error": err_msg}, indent=2))
+        else:
+            print(err_msg, file=sys.stderr)
         return 1
 
     graph = slice_neighborhood(seeds=[symbol], indexer=indexer, k=args.k)
@@ -136,7 +144,34 @@ def cmd_slice(args: argparse.Namespace) -> int:
     dummy_gate = GateResult(status="APPROVED", confidence=1.0)
     dsl = linearize_subgraph(dummy_patch, graph, dummy_gate)
 
-    print(dsl)
+    if getattr(args, "json", False):
+        slice_data = {
+            "symbol": symbol.qualname,
+            "file": symbol.file_path,
+            "k": args.k,
+            "truncated": graph.truncated,
+            "nodes": [
+                {
+                    "id": n.id,
+                    "name": n.name,
+                    "file_path": n.file_path,
+                    "kind": n.kind,
+                    "signature": n.signature,
+                    "is_seed": n.is_seed,
+                    "is_modified": n.is_modified,
+                }
+                for n in graph.nodes.values()
+            ],
+            "edges": [
+                {"source": e.source, "target": e.target, "relation": e.relation}
+                for e in graph.edges
+            ],
+            "linearized_subgraph": dsl,
+        }
+        print(json.dumps(slice_data, indent=2))
+    else:
+        print(dsl)
+
     return 0
 
 
@@ -145,10 +180,13 @@ def cmd_clean(args: argparse.Namespace) -> int:
     ws = Path(args.workspace) if args.workspace else Path.cwd()
     indexer = WorkspaceIndexer(workspace_root=ws)
     cleaned = indexer.clean()
-    if cleaned:
-        print(f"Code Oracle cache cleaned successfully from {ws}")
+    if getattr(args, "json", False):
+        print(json.dumps({"cleaned": cleaned, "workspace": str(ws)}, indent=2))
     else:
-        print(f"Notice: Cache directory not found or already clean in {ws}")
+        if cleaned:
+            print(f"Code Oracle cache cleaned successfully from {ws}")
+        else:
+            print(f"Notice: Cache directory not found or already clean in {ws}")
     return 0
 
 
@@ -170,7 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
     # verify
     p_verify = subparsers.add_parser("verify", help="Verify a code patch proposal")
     p_verify.add_argument("file", help="Target source file being patched")
-    p_verify.add_argument("--patch", "-p", help="Patch diff string or path to diff file")
+    p_verify.add_argument("--patch", "-p", help="Patch diff string or path to diff file (use '-' for stdin)")
     p_verify.add_argument("--k", type=int, default=1, help="k-hop neighborhood radius (default: 1)")
     p_verify.add_argument("--workspace", "-w", help="Workspace root directory")
     p_verify.add_argument("--json", action="store_true", help="Output machine-readable JSON")
@@ -189,11 +227,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_slice.add_argument("--symbol", "-s", required=True, help="Target symbol name")
     p_slice.add_argument("--k", type=int, default=1, help="k-hop depth (1 or 2)")
     p_slice.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_slice.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_slice.set_defaults(func=cmd_slice)
 
     # clean
     p_clean = subparsers.add_parser("clean", help="Clean .code_oracle/ cache (Rollback Resilience)")
     p_clean.add_argument("workspace", nargs="?", default=".", help="Workspace root directory")
+    p_clean.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_clean.set_defaults(func=cmd_clean)
 
     # serve
@@ -209,8 +249,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if not hasattr(args, "func"):
-        parser.print_help()
-        sys.exit(1)
+        parser.print_help(sys.stderr)
+        sys.exit(2)
 
     sys.exit(args.func(args))
 

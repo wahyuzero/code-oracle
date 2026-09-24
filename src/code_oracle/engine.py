@@ -91,11 +91,17 @@ class TopoSliceEngine:
                 )
 
             # Stage 3: k-Hop Neighborhood Slicer
-            seed_symbols = (
+            all_seeds = (
                 patch_result.affected_symbols
-                or patch_result.added_symbols
-                or patch_result.deleted_symbols
+                + patch_result.added_symbols
+                + patch_result.deleted_symbols
             )
+            seen_ids = set()
+            seed_symbols = []
+            for s in all_seeds:
+                if s.id not in seen_ids:
+                    seen_ids.add(s.id)
+                    seed_symbols.append(s)
             slice_graph = slice_neighborhood(
                 seeds=seed_symbols,
                 indexer=self.indexer,

@@ -38,6 +38,8 @@ def parse_unified_diff(diff_text: str) -> List[DiffHunk]:
                 current_hunk = None
             elif line.startswith(("+", "-", " ", "\\")):
                 current_hunk.lines.append(line)
+            elif line == "":
+                current_hunk.lines.append(" ")
 
     return hunks
 
@@ -128,6 +130,8 @@ def _extract_calls_from_node(node: ast.AST, caller_id: Optional[str] = None) -> 
             except Exception:
                 callee_name = "<unknown>"
             kwargs = [kw.arg for kw in child.keywords if kw.arg is not None]
+            has_vararg = any(isinstance(a, ast.Starred) for a in child.args)
+            has_kwarg = any(kw.arg is None for kw in child.keywords)
             calls.append(
                 CallReference(
                     callee=callee_name,
@@ -135,6 +139,8 @@ def _extract_calls_from_node(node: ast.AST, caller_id: Optional[str] = None) -> 
                     kwargs=kwargs,
                     lineno=getattr(child, "lineno", 0),
                     caller=caller_id,
+                    has_vararg=has_vararg,
+                    has_kwarg=has_kwarg,
                 )
             )
     return calls
@@ -330,6 +336,26 @@ def extract_symbols_from_ast(source: str, file_path: str = "") -> List[Symbol]:
                 process_body(node.body, parent_qualname=qualname, is_parent_class=True)
 
     process_body(tree.body)
+
+    # Extract module-level calls (calls outside all functions and classes)
+    module_calls = [
+        c for c in _extract_calls_from_node(tree, caller_id=f"{file_path}::<module>")
+        if not any(s.lineno <= c.lineno <= s.end_lineno for s in symbols)
+    ]
+    if module_calls:
+        line_count = len(source.splitlines()) or 1
+        module_sym = Symbol(
+            name="<module>",
+            qualname="<module>",
+            file_path=file_path,
+            kind="module",
+            lineno=1,
+            end_lineno=line_count,
+            signature=f"# module {file_path}",
+            calls=module_calls,
+        )
+        symbols.append(module_sym)
+
     return symbols
 
 
@@ -398,6 +424,8 @@ def locate_affected_symbols(
     seen_qualnames = set()
 
     for sym in patched_symbols:
+        if sym.kind == "module":
+            continue
         # Check if any new line overlaps with symbol span
         sym_lines = set(range(sym.lineno, sym.end_lineno + 1))
         if sym_lines.intersection(new_lines):
@@ -406,25 +434,50 @@ def locate_affected_symbols(
 
     # Also check if old symbols were modified/removed and not yet caught
     for sym in orig_symbols:
+        if sym.kind == "module":
+            continue
         sym_lines = set(range(sym.lineno, sym.end_lineno + 1))
         if sym_lines.intersection(old_lines):
             if sym.qualname in patched_map and sym.qualname not in seen_qualnames:
                 affected.append(patched_map[sym.qualname])
                 seen_qualnames.add(sym.qualname)
 
-    # If no symbols matched, but lines were modified, attribute to module level
-    if not affected and (old_lines or new_lines):
-        line_count = len(patched_content.splitlines()) or 1
-        module_sym = Symbol(
-            name="<module>",
-            qualname="<module>",
-            file_path=clean_path,
-            kind="module",
-            lineno=1,
-            end_lineno=line_count,
-            signature=f"# module {clean_path}",
-        )
-        affected.append(module_sym)
+    # Check if lines outside any function/class symbol were modified
+    non_module_patched = [s for s in patched_symbols if s.kind != "module"]
+    non_module_orig = [s for s in orig_symbols if s.kind != "module"]
+    has_module_level_change = (
+        any(not any(s.lineno <= l <= s.end_lineno for s in non_module_patched) for l in new_lines)
+        or any(not any(s.lineno <= l <= s.end_lineno for s in non_module_orig) for l in old_lines)
+    )
+
+    if has_module_level_change or (not affected and (old_lines or new_lines)):
+        module_sym = next((s for s in patched_symbols if s.qualname == "<module>"), None)
+        if not module_sym:
+            line_count = len(patched_content.splitlines()) or 1
+            module_calls: List[CallReference] = []
+            try:
+                tree = ast.parse(patched_content)
+                module_calls = [
+                    c for c in _extract_calls_from_node(tree, caller_id=f"{clean_path}::<module>")
+                    if not any(s.lineno <= c.lineno <= s.end_lineno for s in non_module_patched)
+                ]
+            except Exception:
+                pass
+
+            module_sym = Symbol(
+                name="<module>",
+                qualname="<module>",
+                file_path=clean_path,
+                kind="module",
+                lineno=1,
+                end_lineno=line_count,
+                signature=f"# module {clean_path}",
+                calls=module_calls,
+            )
+            patched_symbols.append(module_sym)
+
+        if module_sym not in affected:
+            affected.append(module_sym)
 
     return PatchResult(
         file_path=clean_path,

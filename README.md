@@ -99,7 +99,7 @@ Code Oracle operates within explicit technical boundaries:
 - [x] Tarjan's SCC Cycle Detector & Deterministic Symbolic Gate
 - [ ] Persistent In-Memory Laya Inference Engine (ONNX Runtime / MLX)
 - [x] Lean FastMCP Server interface (`verify_patch`)
-- [ ] Agentic `SKILL.md` distribution for Claude Code, Cursor, and Antigravity
+- [x] Agentic `SKILL.md` distribution for Claude Code, Cursor, and Antigravity
 - [x] CLI entrypoint & Git pre-commit verification command (`code-oracle verify`)
 
 ---
