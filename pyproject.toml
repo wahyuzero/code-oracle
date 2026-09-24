@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "code-oracle"
+version = "0.1.0"
+description = "Sub-50ms Neuro-Symbolic Verification Oracle for AI Coding Agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    { name = "Wahyu Febri Tamtomo", email = "wahyuzero@users.noreply.github.com" },
+]
+keywords = [
+    "ai-agent",
+    "mcp",
+    "ast",
+    "tree-sitter",
+    "neuro-symbolic",
+    "verification",
+    "laya",
+    "decision-model",
+    "frugal-computing"
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "tree-sitter>=0.22.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+code-oracle = "code_oracle.cli:main"
