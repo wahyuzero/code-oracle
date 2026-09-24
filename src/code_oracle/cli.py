@@ -325,6 +325,41 @@ def cmd_hook_run(args: argparse.Namespace) -> int:
     return result["exit_code"]
 
 
+def cmd_dataset(args: argparse.Namespace) -> int:
+    """Execute dataset mining and synthetic generation."""
+    from code_oracle.dataset import DatasetGenerator
+
+    lang_list = [l.strip().lower() for l in args.languages.split(",") if l.strip()]
+    generator = DatasetGenerator(
+        languages=lang_list,
+        seed=args.seed,
+        positive_label=args.positive_label,
+        negative_label=args.negative_label,
+    )
+
+    out_dir = Path(args.output_dir)
+    train_count, val_count = generator.generate_and_export(
+        output_dir=out_dir,
+        num_samples=args.num_samples,
+        val_ratio=args.val_ratio,
+        repo_path=Path(args.repo) if args.repo else None,
+    )
+
+    if args.json:
+        print(json.dumps({
+            "status": "SUCCESS",
+            "output_dir": str(out_dir),
+            "train_samples": train_count,
+            "val_samples": val_count,
+            "total_samples": train_count + val_count,
+            "languages": lang_list,
+        }, indent=2))
+    else:
+        print(f"Generated {train_count} train samples, {val_count} val samples into {out_dir}")
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -368,6 +403,19 @@ def build_parser() -> argparse.ArgumentParser:
     # serve
     p_serve = subparsers.add_parser("serve", help="Run the Lean FastMCP server")
     p_serve.set_defaults(func=cmd_serve)
+
+    # dataset
+    p_dataset = subparsers.add_parser("dataset", help="Mine and generate multi-language training datasets")
+    p_dataset.add_argument("--repo", "-r", help="Path to existing repository to mine")
+    p_dataset.add_argument("--output-dir", "-o", default="./dataset_output", help="Output directory for JSONL datasets")
+    p_dataset.add_argument("--num-samples", "-n", type=int, default=100, help="Target total samples")
+    p_dataset.add_argument("--val-ratio", type=float, default=0.2, help="Validation ratio")
+    p_dataset.add_argument("--languages", "-l", default="python,typescript,go,rust", help="Comma-separated languages")
+    p_dataset.add_argument("--seed", type=int, default=42, help="Random seed")
+    p_dataset.add_argument("--positive-label", type=int, default=1, help="Positive label (default: 1)")
+    p_dataset.add_argument("--negative-label", type=int, default=0, help="Negative label (default: 0)")
+    p_dataset.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_dataset.set_defaults(func=cmd_dataset)
 
     # hook
     p_hook = subparsers.add_parser("hook", help="Git pre-commit hook and toggle system")

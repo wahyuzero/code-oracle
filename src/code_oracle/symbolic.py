@@ -248,8 +248,8 @@ def verify_symbolic_gate(
                 if c not in callers:
                     callers.append(c)
 
-        # If __init__ method of a class, callers might be instantiating the class by its class name
-        if sym.name == "__init__" and "." in sym.qualname:
+        # If __init__ or constructor method of a class, callers might be instantiating the class by its class name
+        if sym.name in ("__init__", "constructor") and "." in sym.qualname:
             class_qualname = sym.qualname.rsplit(".", 1)[0]
             for c in indexer.get_callers(class_qualname):
                 if c not in callers:
@@ -365,35 +365,56 @@ def verify_symbolic_gate(
                 if imp.name not in defined_names and imp.name not in imported_names:
                     target_full = indexer.workspace_root / target_f
                     target_dir = target_full.parent
-                    submod = target_dir / f"{imp.name}.py"
-                    subpkg = target_dir / imp.name / "__init__.py"
-                    has_symbol = submod.exists() or subpkg.exists()
+                    submod_cands = [
+                        target_dir / f"{imp.name}.py",
+                        target_dir / imp.name / "__init__.py",
+                        target_dir / f"{imp.name}.ts",
+                        target_dir / f"{imp.name}.tsx",
+                        target_dir / f"{imp.name}.js",
+                        target_dir / imp.name / "index.ts",
+                        target_dir / imp.name / "index.js",
+                        target_dir / f"{imp.name}.rs",
+                        target_dir / imp.name / "mod.rs",
+                        target_dir / f"{imp.name}.go",
+                    ]
+                    has_symbol = any(c.exists() for c in submod_cands)
                     if not has_symbol and target_full.exists():
-                        try:
-                            src = target_full.read_text(encoding="utf-8", errors="ignore")
-                            tree = ast.parse(src)
-                            for node in ast.walk(tree):
-                                if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                                    target_list = node.targets if isinstance(node, ast.Assign) else [node.target]
-                                    for t in target_list:
-                                        for child in ast.walk(t):
-                                            if isinstance(child, ast.Name) and child.id == imp.name:
-                                                has_symbol = True
+                        if target_f.endswith(".py"):
+                            try:
+                                src = target_full.read_text(encoding="utf-8", errors="ignore")
+                                tree = ast.parse(src)
+                                for node in ast.walk(tree):
+                                    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                                        target_list = node.targets if isinstance(node, ast.Assign) else [node.target]
+                                        for t in target_list:
+                                            for child in ast.walk(t):
+                                                if isinstance(child, ast.Name) and child.id == imp.name:
+                                                    has_symbol = True
+                                                    break
+                                            if has_symbol:
                                                 break
-                                        if has_symbol:
+                                    elif isinstance(node, ast.NamedExpr):
+                                        if isinstance(node.target, ast.Name) and node.target.id == imp.name:
+                                            has_symbol = True
                                             break
-                                elif isinstance(node, ast.NamedExpr):
-                                    if isinstance(node.target, ast.Name) and node.target.id == imp.name:
-                                        has_symbol = True
+                                    elif isinstance(node, getattr(ast, "TypeAlias", ())):
+                                        if isinstance(node.name, ast.Name) and node.name.id == imp.name:
+                                            has_symbol = True
+                                            break
+                                    if has_symbol:
                                         break
-                                elif isinstance(node, getattr(ast, "TypeAlias", ())):
-                                    if isinstance(node.name, ast.Name) and node.name.id == imp.name:
-                                        has_symbol = True
-                                        break
-                                if has_symbol:
-                                    break
-                        except Exception:
-                            has_symbol = True
+                            except Exception:
+                                has_symbol = True
+                        else:
+                            # For TypeScript, Go, Rust: check extracted symbols from target file
+                            try:
+                                src = target_full.read_text(encoding="utf-8", errors="ignore")
+                                from code_oracle.languages import extract_symbols
+                                syms = extract_symbols(src, file_path=target_f)
+                                if any(s.name == imp.name for s in syms):
+                                    has_symbol = True
+                            except Exception:
+                                pass
                     if not has_symbol:
                         module_label = imp.module if imp.module else ("." * imp.level)
                         violations.append(

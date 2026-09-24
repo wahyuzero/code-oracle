@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from code_oracle.languages import SUPPORTED_EXTENSIONS
 from code_oracle.locator import extract_imports_from_ast, extract_symbols_from_ast
 from code_oracle.models import CallReference, ImportReference, Parameter, Symbol
 
@@ -126,7 +127,8 @@ class WorkspaceIndexer:
             dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
 
             for file in files:
-                if not file.endswith(".py"):
+                ext = Path(file).suffix.lower()
+                if ext not in SUPPORTED_EXTENSIONS:
                     continue
 
                 full_path = Path(root) / file
@@ -334,7 +336,7 @@ class WorkspaceIndexer:
                 for call in sym.calls:
                     callee = call.callee
                     self._callers.setdefault(callee, []).append(call)
-                    simple = callee.split(".")[-1]
+                    simple = callee.split(".")[-1].split("::")[-1]
                     if simple != callee:
                         self._callers.setdefault(simple, []).append(call)
 
@@ -364,6 +366,132 @@ class WorkspaceIndexer:
         cur_p = Path(current_file)
         cur_dir = cur_p.parent
 
+        cur_ext = cur_p.suffix.lower()
+
+        # TypeScript / JavaScript import resolution
+        if cur_ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+            mod_str = imp.module or imp.name
+            if mod_str.startswith("node:"):
+                return None
+            first_pkg = mod_str.split("/")[0]
+            if first_pkg in {
+                "assert", "async_hooks", "buffer", "child_process", "cluster", "console",
+                "constants", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
+                "events", "fs", "http", "http2", "https", "inspector", "module", "net",
+                "os", "path", "perf_hooks", "process", "punycode", "querystring",
+                "readline", "repl", "stream", "string_decoder", "timers", "tls",
+                "trace_events", "tty", "url", "util", "v8", "vm", "wasi", "worker_threads",
+                "zlib",
+            }:
+                return None
+
+            rel_mod = mod_str.lstrip("./") if mod_str.startswith("./") else mod_str
+            base = (cur_dir / rel_mod).as_posix()
+            ts_cands = [
+                base,
+                f"{base}.ts",
+                f"{base}.tsx",
+                f"{base}.js",
+                f"{base}.jsx",
+                f"{base}/index.ts",
+                f"{base}/index.tsx",
+                f"{base}/index.js",
+                rel_mod,
+                f"{rel_mod}.ts",
+                f"{rel_mod}.tsx",
+                f"{rel_mod}.js",
+                f"src/{rel_mod}.ts",
+                f"src/{rel_mod}.tsx",
+                f"src/{rel_mod}.js",
+            ]
+            for cand in ts_cands:
+                norm = Path(cand).as_posix()
+                if norm.startswith("./"):
+                    norm = norm[2:]
+                if norm in available_files:
+                    return norm
+            return None
+
+        # Go import resolution
+        if cur_ext == ".go":
+            mod_path = imp.module or imp.name
+            first_segment = mod_path.split("/")[0]
+            # Standard library packages in Go should not resolve to workspace files
+            go_stdlib = {
+                "archive", "tar", "zip", "bufio", "builtin", "bytes", "compress",
+                "bzip2", "flate", "gzip", "lzw", "zlib", "container", "heap", "list",
+                "ring", "context", "crypto", "aes", "cipher", "des", "dsa", "ecdsa",
+                "ed25519", "elliptic", "hmac", "md5", "rand", "rc4", "rsa", "sha1",
+                "sha256", "sha512", "subtle", "tls", "x509", "database", "sql",
+                "debug", "dwarf", "elf", "gosym", "macho", "pe", "plan9obj", "embed",
+                "encoding", "ascii85", "asn1", "base32", "base64", "binary", "csv",
+                "gob", "hex", "json", "pem", "xml", "errors", "expvar", "flag",
+                "fmt", "go", "ast", "build", "constant", "doc", "format", "parser",
+                "printer", "scanner", "token", "types", "hash", "adler32", "crc32",
+                "crc64", "fnv", "maphash", "html", "template", "image", "color",
+                "draw", "gif", "jpeg", "png", "index", "suffixarray", "io", "fs",
+                "ioutil", "log", "slog", "syslog", "math", "big", "bits", "cmplx",
+                "mime", "multipart", "quotedprintable", "net", "http", "cgi",
+                "cookiejar", "fcgi", "httptest", "httptrace", "httputil", "pprof",
+                "mail", "rpc", "jsonrpc", "smtp", "textproto", "url", "os", "exec",
+                "signal", "user", "path", "filepath", "plugin", "reflect", "regexp",
+                "syntax", "runtime", "cgo", "coverage", "metrics", "msan",
+                "race", "trace", "sort", "strconv", "strings", "sync", "atomic",
+                "syscall", "testing", "fstest", "iotest", "quick", "text", "tabwriter",
+                "time", "tzdata", "unicode", "utf16", "utf8", "unsafe",
+            }
+            if first_segment in go_stdlib:
+                return None
+
+            # Relative Go imports
+            if mod_path.startswith("./") or mod_path.startswith("../"):
+                target_dir = (cur_dir / mod_path).resolve()
+                for af in available_files:
+                    if af.endswith(".go") and (self.workspace_root / af).parent.resolve() == target_dir:
+                        return af
+                return None
+
+            # Package path matching
+            pkg_target = mod_path.split("/")[-1]
+            for af in available_files:
+                if not af.endswith(".go"):
+                    continue
+                af_dir = Path(af).parent
+                if af_dir == cur_dir:
+                    continue
+                if af_dir.name == pkg_target or af_dir.as_posix().endswith(mod_path):
+                    return af
+            return None
+
+        # Rust import resolution
+        if cur_ext == ".rs":
+            mod_target = (imp.module or imp.name)
+            first_crate = mod_target.split("::")[0]
+            if first_crate in {"std", "core", "alloc", "proc_macro", "test"}:
+                return None
+
+            cleaned_mod = mod_target.replace("crate::", "").replace("super::", "../").replace("self::", "").replace("::", "/")
+            rs_cands = [
+                f"{cur_dir / cleaned_mod}.rs",
+                f"{cur_dir / cleaned_mod}/mod.rs",
+                f"{cur_dir / imp.name}.rs",
+                f"{cur_dir / imp.name}/mod.rs",
+                f"src/{cleaned_mod}.rs",
+                f"src/{cleaned_mod}/mod.rs",
+                f"src/{imp.name}.rs",
+                f"src/{imp.name}/mod.rs",
+                f"{cleaned_mod}.rs",
+                f"{imp.name}.rs",
+            ]
+            for cand in rs_cands:
+                norm = Path(cand).as_posix()
+                if norm.startswith("./"):
+                    norm = norm[2:]
+                if norm in available_files:
+                    return norm
+            return None
+
+        # Python import resolution (default)
         candidates = []
 
         if imp.level > 0:
@@ -443,10 +571,11 @@ class WorkspaceIndexer:
                 return self._definitions[same_file]
             return self.get_definition(attr)
 
-        # 3. Dotted callee: ClassName.method or mod.func
-        if "." in callee:
+        # 3. Dotted or scoped callee: ClassName.method, mod.func, or mod::func
+        if "." in callee or "::" in callee:
+            sep = "::" if "::" in callee else "."
             if caller_sym:
-                prefix, attr = callee.split(".", 1)
+                prefix, attr = callee.split(sep, 1)
                 caller_file = caller_sym.file_path
                 f_data = self._file_cache.get(caller_file, {})
                 for imp_data in f_data.get("imports", []):
@@ -463,7 +592,7 @@ class WorkspaceIndexer:
             match = self.get_definition(callee)
             if match:
                 return match
-            attr = callee.split(".")[-1]
+            attr = callee.split(sep)[-1]
             if caller_sym:
                 same_file = f"{caller_sym.file_path}::{attr}"
                 if same_file in self._definitions:
@@ -516,7 +645,7 @@ class WorkspaceIndexer:
             for c in self._callers[symbol_name_or_qualname]:
                 add_call(c)
 
-        simple_name = symbol_name_or_qualname.split(".")[-1]
+        simple_name = symbol_name_or_qualname.split(".")[-1].split("::")[-1]
         if simple_name != symbol_name_or_qualname and simple_name in self._callers:
             for c in self._callers[simple_name]:
                 add_call(c)
@@ -550,14 +679,16 @@ class WorkspaceIndexer:
         return self._subclasses.get(class_name, [])
 
     def resolve_class_init(self, class_sym: Symbol) -> Optional[Symbol]:
-        """Find __init__ definition for a class, checking inheritance if needed."""
-        # 1. Direct __init__ in class
-        init_id = f"{class_sym.file_path}::{class_sym.qualname}.__init__"
-        if init_id in self._definitions:
-            return self._definitions[init_id]
-        direct_match = self.get_definition(f"{class_sym.qualname}.__init__")
-        if direct_match:
-            return direct_match
+        """Find constructor definition (__init__ for Python, constructor for TS/JS), checking inheritance."""
+        # 1. Direct constructor in class
+        init_names = ["__init__", "constructor"]
+        for init_name in init_names:
+            init_id = f"{class_sym.file_path}::{class_sym.qualname}.{init_name}"
+            if init_id in self._definitions:
+                return self._definitions[init_id]
+            direct_match = self.get_definition(f"{class_sym.qualname}.{init_name}")
+            if direct_match:
+                return direct_match
 
         # 2. Check base classes
         for base_name in getattr(class_sym, "bases", []):

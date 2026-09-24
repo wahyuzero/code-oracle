@@ -101,6 +101,8 @@ Code Oracle operates within explicit technical boundaries:
 - [x] Lean FastMCP Server interface (`verify_patch`)
 - [x] Agentic `SKILL.md` distribution for Claude Code, Cursor, and Antigravity
 - [x] Git pre-commit & pre-push verification hook with unblock toggle (`code-oracle hook`)
+- [x] Multi-language AST extractors for Tier 1 languages (Python, TypeScript, Go, Rust)
+- [x] Synthetic mutation and training dataset mining engine (`tools/dataset_generator.py`)
 
 ---
 

@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
+from code_oracle.languages import extract_imports, extract_symbols, validate_syntax
 from code_oracle.models import CallReference, DiffHunk, ImportReference, Parameter, PatchResult, Symbol
 
 
@@ -151,48 +152,19 @@ def _extract_calls_from_node(node: ast.AST, caller_id: Optional[str] = None) -> 
 
 
 def extract_imports_from_ast(source: str, file_path: str = "") -> List[ImportReference]:
-    """Extract all import statements from source."""
-    if not source.strip():
-        return []
-
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return []
-
-    imports: List[ImportReference] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.append(
-                    ImportReference(
-                        module=None,
-                        name=alias.name,
-                        asname=alias.asname,
-                        lineno=getattr(node, "lineno", 0),
-                        file_path=file_path,
-                        level=0,
-                    )
-                )
-        elif isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                imports.append(
-                    ImportReference(
-                        module=node.module,
-                        name=alias.name,
-                        asname=alias.asname,
-                        lineno=getattr(node, "lineno", 0),
-                        file_path=file_path,
-                        level=node.level,
-                    )
-                )
-    return imports
+    """Extract all import statements from source for any supported language."""
+    return extract_imports(source, file_path=file_path)
 
 
 def extract_symbols_from_ast(source: str, file_path: str = "") -> List[Symbol]:
     """Parse source into AST and extract symbol entities with detailed metadata."""
     if not source.strip():
         return []
+
+    from code_oracle.languages import detect_language, extract_symbols
+    lang = detect_language(file_path)
+    if lang and lang != "python":
+        return extract_symbols(source, file_path=file_path, language=lang)
 
     try:
         tree = ast.parse(source)
@@ -403,16 +375,15 @@ def locate_affected_symbols(
     )
 
     # Check syntax of patched content
-    try:
-        ast.parse(patched_content)
-    except SyntaxError as e:
+    syntax_error = validate_syntax(patched_content, file_path=clean_path)
+    if syntax_error:
         return PatchResult(
             file_path=clean_path,
             original_content=original_content,
             patched_content=patched_content,
             modified_old_lines=old_lines,
             modified_new_lines=new_lines,
-            syntax_error=f"SyntaxError at line {e.lineno}:{e.offset}: {e.msg}",
+            syntax_error=syntax_error,
         )
 
     orig_symbols = extract_symbols_from_ast(original_content, file_path=clean_path)
@@ -462,14 +433,15 @@ def locate_affected_symbols(
         if not module_sym:
             line_count = len(patched_content.splitlines()) or 1
             module_calls: List[CallReference] = []
-            try:
-                tree = ast.parse(patched_content)
-                module_calls = [
-                    c for c in _extract_calls_from_node(tree, caller_id=f"{clean_path}::<module>")
-                    if not any(s.lineno <= c.lineno <= s.end_lineno for s in non_module_patched)
-                ]
-            except Exception:
-                pass
+            if clean_path.endswith(".py") or not clean_path:
+                try:
+                    tree = ast.parse(patched_content)
+                    module_calls = [
+                        c for c in _extract_calls_from_node(tree, caller_id=f"{clean_path}::<module>")
+                        if not any(s.lineno <= c.lineno <= s.end_lineno for s in non_module_patched)
+                    ]
+                except Exception:
+                    pass
 
             module_sym = Symbol(
                 name="<module>",
