@@ -1,0 +1,7 @@
+- id: code-oracle
+  name: Code Oracle Pre-Commit Gate
+  description: Sub-50ms Neuro-Symbolic Verification Oracle for AI Coding Agents
+  entry: code-oracle hook run
+  language: python
+  types: [python]
+  pass_filenames: false

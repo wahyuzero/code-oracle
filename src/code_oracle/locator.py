@@ -44,16 +44,20 @@ def parse_unified_diff(diff_text: str) -> List[DiffHunk]:
     return hunks
 
 
-def apply_patch(original_text: str, patch_text: str) -> Tuple[str, Set[int], Set[int]]:
+def apply_patch(
+    original_text: str,
+    patch_text: str,
+    is_replacement: bool = False,
+) -> Tuple[str, Set[int], Set[int]]:
     """
     Applies unified diff or replacement text in memory.
     Returns:
         (patched_text, modified_old_lines, modified_new_lines)
     """
-    hunks = parse_unified_diff(patch_text)
+    hunks = [] if is_replacement else parse_unified_diff(patch_text)
 
-    # If no diff hunks found, treat patch_text as full replacement content
-    if not hunks:
+    # If no diff hunks found or explicitly replacement, treat patch_text as full replacement content
+    if is_replacement or not hunks:
         orig_lines = original_text.splitlines(keepends=True)
         patched_lines = patch_text.splitlines(keepends=True)
 
@@ -364,6 +368,7 @@ def locate_affected_symbols(
     patch_content: str,
     workspace_root: Optional[Path] = None,
     original_content: Optional[str] = None,
+    is_replacement: bool = False,
 ) -> PatchResult:
     """
     Stage 1 Diff Boundary Locator:
@@ -393,7 +398,9 @@ def locate_affected_symbols(
             original_content = ""
 
     # Apply patch
-    patched_content, old_lines, new_lines = apply_patch(original_content, patch_content)
+    patched_content, old_lines, new_lines = apply_patch(
+        original_content, patch_content, is_replacement=is_replacement
+    )
 
     # Check syntax of patched content
     try:

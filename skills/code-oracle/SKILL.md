@@ -108,6 +108,68 @@ Start the lightweight FastMCP server exposing `verify_code_patch` for MCP-enable
 code-oracle serve
 ```
 
+### 6. `hook` (Git Pre-Commit Hook & Toggle System)
+
+Install, toggle, and execute deterministic pre-flight verification gates directly inside git workflows (`.git/hooks/pre-commit` or `pre-push`).
+
+```bash
+# Safely install pre-commit hook non-destructively
+code-oracle hook install
+
+# Install with advisory warning mode (exits 0 instead of blocking)
+code-oracle hook install --mode warn
+
+# Optionally install as pre-push hook
+code-oracle hook install --hook pre-push
+
+# Check hook installation status and toggle state
+code-oracle hook status
+code-oracle hook status --json
+
+# Temporarily toggle hook off (fast < 1ms bypass)
+code-oracle hook off       # (alias: code-oracle hook disable)
+
+# Re-enable hook
+code-oracle hook on        # (alias: code-oracle hook enable)
+
+# Switch between strict 'block' and advisory 'warn' modes
+code-oracle hook mode warn
+code-oracle hook mode block
+
+# Manually run verification on staged Python files
+code-oracle hook run
+code-oracle hook run --json
+
+# Safely uninstall hook (Rollback Resilience - restores hooks cleanly)
+code-oracle hook uninstall
+```
+
+#### Fast Bypass (< 1ms)
+To bypass verification for a single commit without modifying hook state:
+```bash
+git commit -n             # Or git commit --no-verify
+# Or via environment variable bypass:
+CODE_ORACLE_SKIP=1 git commit
+```
+
+#### Staged Diff Isolation & Multi-File Atomic Evaluation
+- **Isolation from Dirty Working Tree:** Extracts exact staged content via `git show :<file>` (`git diff --cached --name-only --diff-filter=ACMR`) rather than reading dirty working tree files. Unstaged edits cannot contaminate verification.
+- **Atomic Multi-File Refactors:** Staged changes across multiple files (e.g. changing signature in `lib.py` and call site in `app.py`) are overlaid together in memory, ensuring cross-file refactors committed together pass verification seamlessly.
+
+#### Python `pre-commit` Framework Integration
+Code Oracle provides native support for the python `pre-commit` framework via `.pre-commit-hooks.yaml`. Add to your `.pre-commit-config.yaml`:
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: code-oracle
+        name: Code Oracle Pre-Commit Gate
+        entry: code-oracle hook run
+        language: python
+        types: [python]
+        pass_filenames: false
+```
+
 ---
 
 ## Parsing Verification Output

@@ -100,7 +100,7 @@ Code Oracle operates within explicit technical boundaries:
 - [ ] Persistent In-Memory Laya Inference Engine (ONNX Runtime / MLX)
 - [x] Lean FastMCP Server interface (`verify_patch`)
 - [x] Agentic `SKILL.md` distribution for Claude Code, Cursor, and Antigravity
-- [x] CLI entrypoint & Git pre-commit verification command (`code-oracle verify`)
+- [x] Git pre-commit & pre-push verification hook with unblock toggle (`code-oracle hook`)
 
 ---
 

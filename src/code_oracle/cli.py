@@ -10,7 +10,15 @@ from pathlib import Path
 from typing import Optional
 
 from code_oracle import __version__
+from code_oracle.config import load_config, resolve_workspace_root, set_enabled, set_mode
 from code_oracle.engine import TopoSliceEngine
+from code_oracle.hook import (
+    format_hook_output,
+    get_hook_status,
+    install_hook,
+    run_hook_verification,
+    uninstall_hook,
+)
 from code_oracle.indexer import WorkspaceIndexer
 from code_oracle.linearizer import linearize_subgraph
 from code_oracle.locator import locate_affected_symbols
@@ -196,6 +204,127 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hook_install(args: argparse.Namespace) -> int:
+    """Safely install git pre-commit hook non-destructively."""
+    ws = Path(args.workspace) if args.workspace else None
+    success, msg = install_hook(
+        workspace_root=ws,
+        hook_name=args.hook,
+        mode=args.mode,
+    )
+    if getattr(args, "json", False):
+        status_info = get_hook_status(ws)
+        status_info["success"] = success
+        status_info["message"] = msg
+        print(json.dumps(status_info, indent=2))
+    else:
+        print(msg)
+    return 0 if success else 1
+
+
+def cmd_hook_uninstall(args: argparse.Namespace) -> int:
+    """Safely uninstall git hook (Rollback Resilience)."""
+    ws = Path(args.workspace) if args.workspace else None
+    success, msg = uninstall_hook(
+        workspace_root=ws,
+        hook_name=args.hook,
+    )
+    if getattr(args, "json", False):
+        status_info = get_hook_status(ws)
+        status_info["success"] = success
+        status_info["message"] = msg
+        print(json.dumps(status_info, indent=2))
+    else:
+        print(msg)
+    return 0
+
+
+def cmd_hook_on(args: argparse.Namespace) -> int:
+    """Enable Code Oracle pre-commit hook."""
+    ws = Path(args.workspace) if args.workspace else None
+    cfg = set_enabled(ws, True)
+    target_ws = resolve_workspace_root(ws)
+    if getattr(args, "json", False):
+        print(json.dumps({"enabled": True, "mode": cfg.get("mode", "block"), "workspace": str(target_ws)}, indent=2))
+    else:
+        print("Code Oracle hook enabled.")
+    return 0
+
+
+def cmd_hook_off(args: argparse.Namespace) -> int:
+    """Disable Code Oracle pre-commit hook."""
+    ws = Path(args.workspace) if args.workspace else None
+    cfg = set_enabled(ws, False)
+    target_ws = resolve_workspace_root(ws)
+    if getattr(args, "json", False):
+        print(json.dumps({"enabled": False, "mode": cfg.get("mode", "block"), "workspace": str(target_ws)}, indent=2))
+    else:
+        print("Code Oracle hook disabled.")
+    return 0
+
+
+def cmd_hook_mode(args: argparse.Namespace) -> int:
+    """Switch hook mode between 'block' and 'warn'."""
+    ws = Path(args.workspace) if args.workspace else None
+    cfg = set_mode(ws, args.mode)
+    target_ws = resolve_workspace_root(ws)
+    if getattr(args, "json", False):
+        print(json.dumps({"enabled": cfg.get("enabled", True), "mode": args.mode, "workspace": str(target_ws)}, indent=2))
+    else:
+        print(f"Code Oracle hook mode set to '{args.mode}'.")
+    return 0
+
+
+def cmd_hook_status(args: argparse.Namespace) -> int:
+    """Show hook installation and configuration status."""
+    ws = Path(args.workspace) if args.workspace else None
+    status_info = get_hook_status(ws)
+    if getattr(args, "json", False):
+        print(json.dumps(status_info, indent=2))
+    else:
+        git_str = f"Yes ({status_info['workspace']})" if status_info["is_git_repo"] else "No"
+        inst_list = []
+        if status_info["pre_commit_installed"]:
+            inst_list.append("pre-commit: installed")
+        else:
+            inst_list.append("pre-commit: not installed")
+        if status_info["pre_push_installed"]:
+            inst_list.append("pre-push: installed")
+        else:
+            inst_list.append("pre-push: not installed")
+        inst_str = f"Yes ({', '.join(inst_list)})" if status_info["installed"] else f"No ({', '.join(inst_list)})"
+        state_str = "ENABLED" if status_info["enabled"] else "DISABLED"
+        mode_desc = (
+            f"{status_info['mode']} (strict exit code 1)"
+            if status_info["mode"] == "block"
+            else f"{status_info['mode']} (advisory exit code 0)"
+        )
+
+        print("Code Oracle Hook Status:")
+        print(f"  Git Repository:  {git_str}")
+        print(f"  Hook Installed:  {inst_str}")
+        print(f"  Hook State:      {state_str}")
+        print(f"  Hook Mode:       {mode_desc}")
+        print(f"  Config File:     {status_info['config_file']}")
+    return 0
+
+
+def cmd_hook_run(args: argparse.Namespace) -> int:
+    """Execute pre-commit verification on staged files."""
+    ws = Path(args.workspace) if args.workspace else None
+    result = run_hook_verification(
+        workspace_root=ws,
+        mode_override=args.mode,
+        k=args.k,
+        files=args.files,
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2))
+    else:
+        print(format_hook_output(result))
+    return result["exit_code"]
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -239,6 +368,59 @@ def build_parser() -> argparse.ArgumentParser:
     # serve
     p_serve = subparsers.add_parser("serve", help="Run the Lean FastMCP server")
     p_serve.set_defaults(func=cmd_serve)
+
+    # hook
+    p_hook = subparsers.add_parser("hook", help="Git pre-commit hook and toggle system")
+    p_hook_sub = p_hook.add_subparsers(dest="hook_command", help="Hook subcommands")
+
+    # hook install
+    p_h_install = p_hook_sub.add_parser("install", help="Safely install git pre-commit hook")
+    p_h_install.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_h_install.add_argument("--mode", choices=["block", "warn"], default=None, help="Hook mode (block or warn)")
+    p_h_install.add_argument("--hook", choices=["pre-commit", "pre-push"], default="pre-commit", help="Target hook (default: pre-commit)")
+    p_h_install.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_h_install.set_defaults(func=cmd_hook_install)
+
+    # hook uninstall
+    p_h_uninstall = p_hook_sub.add_parser("uninstall", help="Safely uninstall git hook (Rollback Resilience)")
+    p_h_uninstall.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_h_uninstall.add_argument("--hook", choices=["pre-commit", "pre-push"], default=None, help="Target hook (default: all installed)")
+    p_h_uninstall.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_h_uninstall.set_defaults(func=cmd_hook_uninstall)
+
+    # hook on / enable
+    p_h_on = p_hook_sub.add_parser("on", aliases=["enable"], help="Enable pre-commit verification")
+    p_h_on.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_h_on.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_h_on.set_defaults(func=cmd_hook_on)
+
+    # hook off / disable
+    p_h_off = p_hook_sub.add_parser("off", aliases=["disable"], help="Disable pre-commit verification")
+    p_h_off.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_h_off.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_h_off.set_defaults(func=cmd_hook_off)
+
+    # hook mode
+    p_h_mode = p_hook_sub.add_parser("mode", help="Switch mode between block and warn")
+    p_h_mode.add_argument("mode", choices=["block", "warn"], help="Hook mode: 'block' (strict exit 1) or 'warn' (advisory exit 0)")
+    p_h_mode.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_h_mode.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_h_mode.set_defaults(func=cmd_hook_mode)
+
+    # hook status
+    p_h_status = p_hook_sub.add_parser("status", help="Show hook installation and configuration status")
+    p_h_status.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_h_status.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_h_status.set_defaults(func=cmd_hook_status)
+
+    # hook run
+    p_h_run = p_hook_sub.add_parser("run", help="Run pre-commit hook verification")
+    p_h_run.add_argument("files", nargs="*", default=[], help="Optional files to verify")
+    p_h_run.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_h_run.add_argument("--mode", choices=["block", "warn"], default=None, help="Override mode (block or warn)")
+    p_h_run.add_argument("--k", type=int, default=1, help="k-hop neighborhood radius (default: 1)")
+    p_h_run.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_h_run.set_defaults(func=cmd_hook_run)
 
     return parser
 
