@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from code_oracle.decision import LayaDecisionHead
 from code_oracle.indexer import WorkspaceIndexer
 from code_oracle.linearizer import linearize_subgraph
 from code_oracle.locator import extract_imports_from_ast, extract_symbols_from_ast, locate_affected_symbols
@@ -23,9 +24,14 @@ class TopoSliceEngine:
     k-Hop Slicing, Tarjan SCC Cycle Detection & Contract Checks, and Graph Linearization.
     """
 
-    def __init__(self, workspace_root: Optional[Path] = None):
+    def __init__(
+        self,
+        workspace_root: Optional[Path] = None,
+        weights_path: Optional[Path] = None,
+    ):
         self.workspace_root = Path(workspace_root or Path.cwd()).resolve()
         self.indexer = WorkspaceIndexer(workspace_root=self.workspace_root)
+        self.decision_head = LayaDecisionHead(weights_path=weights_path)
 
     def verify(
         self,
@@ -68,6 +74,7 @@ class TopoSliceEngine:
             return VerificationReport(
                 status="REJECTED",
                 confidence=1.0,
+                risk_score=1.0,
                 cycles_detected=[],
                 invariant_violations=[violation_msg],
                 linearized_subgraph=f"[DIFF_TARGET] {norm_path} (SYNTAX_ERROR)\n[GATE]\nSTATUS: REJECTED\nVIOLATIONS:\n  - {violation_msg}",
@@ -126,11 +133,20 @@ class TopoSliceEngine:
                 max_tokens=400,
             )
 
+            # Stage 6: Decision Head / Risk Calibration
+            final_status, final_conf, final_risk = self.decision_head.predict(
+                linearized_dsl=linearized_dsl,
+                symbolic_status=gate_result.status,
+                symbolic_confidence=gate_result.confidence,
+                has_violations=bool(gate_result.violations or gate_result.cycles),
+            )
+
             elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
             return VerificationReport(
-                status=gate_result.status,
-                confidence=gate_result.confidence,
+                status=final_status,
+                confidence=final_conf,
+                risk_score=final_risk,
                 cycles_detected=gate_result.cycles,
                 invariant_violations=gate_result.violations,
                 linearized_subgraph=linearized_dsl,
@@ -209,6 +225,7 @@ class TopoSliceEngine:
             return VerificationReport(
                 status="REJECTED",
                 confidence=1.0,
+                risk_score=1.0,
                 cycles_detected=[],
                 invariant_violations=syntax_errors,
                 linearized_subgraph="[BATCH_DIFF] SYNTAX_ERROR\n[GATE]\nSTATUS: REJECTED\nVIOLATIONS:\n"
@@ -319,9 +336,18 @@ class TopoSliceEngine:
             if all_violations:
                 dsl += "\nVIOLATIONS:\n" + "\n".join(f"  - {v}" for v in all_violations)
 
+            # Stage 6: Decision Head / Risk Calibration
+            final_status, final_conf, final_risk = self.decision_head.predict(
+                linearized_dsl=dsl,
+                symbolic_status=status,
+                symbolic_confidence=confidence,
+                has_violations=bool(all_violations or all_cycles),
+            )
+
             return VerificationReport(
-                status=status,
-                confidence=confidence,
+                status=final_status,
+                confidence=final_conf,
+                risk_score=final_risk,
                 cycles_detected=all_cycles,
                 invariant_violations=all_violations,
                 linearized_subgraph=dsl,

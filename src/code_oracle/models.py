@@ -145,11 +145,13 @@ class VerificationReport:
     linearized_subgraph: str
     affected_symbols: List[str]
     latency_ms: float
+    risk_score: float = 0.05
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "status": self.status,
             "confidence": round(self.confidence, 4),
+            "risk_score": round(self.risk_score, 4),
             "cycles_detected": self.cycles_detected,
             "invariant_violations": self.invariant_violations,
             "linearized_subgraph": self.linearized_subgraph,
