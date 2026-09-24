@@ -47,7 +47,15 @@ def linearize_subgraph(
     else:
         target_header = f"[DIFF_TARGET] {patch_result.file_path}::<module> (MODIFIED)"
 
-    lines_str = f"OldLines: {sorted(list(patch_result.modified_old_lines))} | NewLines: {sorted(list(patch_result.modified_new_lines))}"
+    def format_line_numbers(line_set: set) -> str:
+        if not line_set:
+            return "[]"
+        sorted_lines = sorted(list(line_set))
+        if len(sorted_lines) <= 6:
+            return str(sorted_lines)
+        return f"[{sorted_lines[0]}..{sorted_lines[-1]}] ({len(sorted_lines)} lines)"
+
+    lines_str = f"OldLines: {format_line_numbers(patch_result.modified_old_lines)} | NewLines: {format_line_numbers(patch_result.modified_new_lines)}"
     meta_header = f"[METADATA] File: {patch_result.file_path} | {lines_str} | Nodes: {len(slice_graph.nodes)} | Edges: {len(slice_graph.edges)}"
 
     # 2. Gate Section
@@ -139,6 +147,20 @@ def linearize_subgraph(
                         dsl = cand
                         break
                 else:
-                    dsl = candidate_dsl[:max_tokens * 3]
+                    dsl = candidate_dsl
+
+    # Hard guarantee: strictly under or equal to max_tokens budget
+    if estimate_tokens(dsl) > max_tokens:
+        dsl_lines = dsl.splitlines()
+        min_lines = min(2, len(dsl_lines))
+        while len(dsl_lines) > min_lines and estimate_tokens("\n".join(dsl_lines)) > max_tokens:
+            dsl_lines.pop()
+        dsl = "\n".join(dsl_lines)
+
+        if estimate_tokens(dsl) > max_tokens:
+            tokens_list = dsl.split()
+            while tokens_list and estimate_tokens(" ".join(tokens_list)) > max_tokens:
+                tokens_list.pop()
+            dsl = " ".join(tokens_list)
 
     return dsl

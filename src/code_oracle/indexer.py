@@ -48,6 +48,9 @@ class WorkspaceIndexer:
 
         # Internal state
         self._file_cache: Dict[str, Dict[str, Any]] = {}
+        self._file_symbols: Dict[str, List[Symbol]] = {}
+        self._file_imports: Dict[str, List[ImportReference]] = {}
+        self._import_graph: Dict[str, List[str]] = {}
         self._definitions: Dict[str, Symbol] = {}
         self._name_to_symbols: Dict[str, List[Symbol]] = {}
         self._callers: Dict[str, List[CallReference]] = {}
@@ -97,6 +100,9 @@ class WorkspaceIndexer:
         Restores workspace to default state with zero destructive impact.
         """
         self._file_cache.clear()
+        self._file_symbols.clear()
+        self._file_imports.clear()
+        self._import_graph.clear()
         self._definitions.clear()
         self._name_to_symbols.clear()
         self._callers.clear()
@@ -171,6 +177,8 @@ class WorkspaceIndexer:
                 reindexed_count += 1
                 symbols = extract_symbols_from_ast(content, file_path=rel_path)
                 imports = extract_imports_from_ast(content, file_path=rel_path)
+                self._file_symbols[rel_path] = symbols
+                self._file_imports[rel_path] = imports
                 self._file_cache[rel_path] = {
                     "mtime": mtime,
                     "hash": content_hash,
@@ -182,9 +190,13 @@ class WorkspaceIndexer:
         stale_files = set(self._file_cache.keys()) - current_rel_files
         for sf in stale_files:
             del self._file_cache[sf]
+            self._file_symbols.pop(sf, None)
+            self._file_imports.pop(sf, None)
+            self._import_graph.pop(sf, None)
 
-        self._rebuild_indices()
-        self.save_cache()
+        if reindexed_count > 0 or stale_files or force:
+            self._rebuild_indices()
+            self.save_cache()
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
         return {
@@ -313,6 +325,101 @@ class WorkspaceIndexer:
             bases=d.get("bases", []),
         )
 
+    def _remove_file_from_indices(self, file_path: str) -> None:
+        """Incrementally prune symbols, callers, importers, and inheritance for a single file."""
+        old_syms = self._file_symbols.get(file_path, [])
+        for sym in old_syms:
+            self._definitions.pop(sym.id, None)
+            if sym.name in self._name_to_symbols:
+                self._name_to_symbols[sym.name] = [s for s in self._name_to_symbols[sym.name] if s.file_path != file_path]
+                if not self._name_to_symbols[sym.name]:
+                    del self._name_to_symbols[sym.name]
+            if sym.qualname != sym.name and sym.qualname in self._name_to_symbols:
+                self._name_to_symbols[sym.qualname] = [s for s in self._name_to_symbols[sym.qualname] if s.file_path != file_path]
+                if not self._name_to_symbols[sym.qualname]:
+                    del self._name_to_symbols[sym.qualname]
+            for base_name in sym.bases:
+                if base_name in self._subclasses:
+                    self._subclasses[base_name] = [s for s in self._subclasses[base_name] if s.file_path != file_path]
+                    if not self._subclasses[base_name]:
+                        del self._subclasses[base_name]
+            for call in sym.calls:
+                prefix = f"{file_path}::"
+                callee = call.callee
+                if callee in self._callers:
+                    self._callers[callee] = [c for c in self._callers[callee] if not (c.caller and c.caller.startswith(prefix))]
+                    if not self._callers[callee]:
+                        del self._callers[callee]
+                simple = callee.split(".")[-1].split("::")[-1]
+                if simple in self._callers:
+                    self._callers[simple] = [c for c in self._callers[simple] if not (c.caller and c.caller.startswith(prefix))]
+                    if not self._callers[simple]:
+                        del self._callers[simple]
+
+        old_imps = self._file_imports.get(file_path, [])
+        for imp in old_imps:
+            if imp.name in self._importers:
+                self._importers[imp.name] = [i for i in self._importers[imp.name] if i.file_path != file_path]
+                if not self._importers[imp.name]:
+                    del self._importers[imp.name]
+            if imp.module:
+                key = f"{imp.module}.{imp.name}"
+                if key in self._importers:
+                    self._importers[key] = [i for i in self._importers[key] if i.file_path != file_path]
+                    if not self._importers[key]:
+                        del self._importers[key]
+
+        self._import_graph.pop(file_path, None)
+        self._file_symbols.pop(file_path, None)
+        self._file_imports.pop(file_path, None)
+
+    def _add_file_to_indices(
+        self,
+        file_path: str,
+        symbols: List[Symbol],
+        imports: List[ImportReference],
+    ) -> None:
+        """Incrementally index symbols, callers, importers, and inheritance for a single file."""
+        self._file_symbols[file_path] = symbols
+        self._file_imports[file_path] = imports
+
+        for sym in symbols:
+            self._definitions[sym.id] = sym
+            self._name_to_symbols.setdefault(sym.name, []).append(sym)
+            if sym.qualname != sym.name:
+                self._name_to_symbols.setdefault(sym.qualname, []).append(sym)
+
+            for base_name in sym.bases:
+                self._subclasses.setdefault(base_name, []).append(sym)
+
+            for call in sym.calls:
+                callee = call.callee
+                self._callers.setdefault(callee, []).append(call)
+                simple = callee.split(".")[-1].split("::")[-1]
+                if simple != callee:
+                    self._callers.setdefault(simple, []).append(call)
+
+                if sym.qualname and "." in sym.qualname:
+                    class_qualname = sym.qualname.rsplit(".", 1)[0]
+                    if callee.startswith(("self.", "cls.")):
+                        self._callers.setdefault(f"{class_qualname}.{simple}", []).append(call)
+                        self._callers.setdefault(
+                            f"{sym.file_path}::{class_qualname}.{simple}", []
+                        ).append(call)
+
+        for imp in imports:
+            self._importers.setdefault(imp.name, []).append(imp)
+            if imp.module:
+                self._importers.setdefault(f"{imp.module}.{imp.name}", []).append(imp)
+
+        # Update import graph edges for this file
+        targets: List[str] = []
+        for imp in imports:
+            target_f = self.resolve_import_to_file(imp, file_path)
+            if target_f and target_f != file_path and target_f not in targets:
+                targets.append(target_f)
+        self._import_graph[file_path] = targets
+
     def _rebuild_indices(self) -> None:
         """Rebuild definitions, name lookup, callers, importers, and inheritance indices."""
         self._definitions.clear()
@@ -320,40 +427,15 @@ class WorkspaceIndexer:
         self._callers.clear()
         self._importers.clear()
         self._subclasses.clear()
+        self._import_graph.clear()
 
         for rel_path, file_data in self._file_cache.items():
-            for sym_data in file_data.get("symbols", []):
-                sym = self._deserialize_symbol(sym_data)
-                self._definitions[sym.id] = sym
+            if rel_path not in self._file_symbols:
+                self._file_symbols[rel_path] = [self._deserialize_symbol(s) for s in file_data.get("symbols", [])]
+            if rel_path not in self._file_imports:
+                self._file_imports[rel_path] = [self._deserialize_import(i) for i in file_data.get("imports", [])]
 
-                self._name_to_symbols.setdefault(sym.name, []).append(sym)
-                if sym.qualname != sym.name:
-                    self._name_to_symbols.setdefault(sym.qualname, []).append(sym)
-
-                for base_name in sym.bases:
-                    self._subclasses.setdefault(base_name, []).append(sym)
-
-                for call in sym.calls:
-                    callee = call.callee
-                    self._callers.setdefault(callee, []).append(call)
-                    simple = callee.split(".")[-1].split("::")[-1]
-                    if simple != callee:
-                        self._callers.setdefault(simple, []).append(call)
-
-                    # If caller is inside a class and calls self.<attr> or cls.<attr>
-                    if sym.qualname and "." in sym.qualname:
-                        class_qualname = sym.qualname.rsplit(".", 1)[0]
-                        if callee.startswith(("self.", "cls.")):
-                            self._callers.setdefault(f"{class_qualname}.{simple}", []).append(call)
-                            self._callers.setdefault(
-                                f"{sym.file_path}::{class_qualname}.{simple}", []
-                            ).append(call)
-
-            for imp_data in file_data.get("imports", []):
-                imp = self._deserialize_import(imp_data)
-                self._importers.setdefault(imp.name, []).append(imp)
-                if imp.module:
-                    self._importers.setdefault(f"{imp.module}.{imp.name}", []).append(imp)
+            self._add_file_to_indices(rel_path, self._file_symbols[rel_path], self._file_imports[rel_path])
 
     def resolve_import_to_file(
         self, imp: ImportReference, current_file: str
@@ -739,10 +821,40 @@ class WorkspaceIndexer:
         except ValueError:
             clean_path = str(file_path).replace("\\", "/")
 
+        self._remove_file_from_indices(clean_path)
+        self._add_file_to_indices(clean_path, symbols, imports or [])
         self._file_cache[clean_path] = {
             "mtime": 0.0,
             "hash": "transient",
             "symbols": [self._serialize_symbol(s) for s in symbols],
             "imports": [self._serialize_import(imp) for imp in (imports or [])],
         }
-        self._rebuild_indices()
+
+    def restore_transient_symbols(
+        self,
+        file_path: str,
+        backup_symbols: List[Symbol],
+        backup_imports: List[ImportReference],
+        cached_backup: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Fast incremental rollback of transient symbols and imports to restore default disk state.
+        """
+        try:
+            p = Path(file_path)
+            clean_path = (
+                str(p.resolve().relative_to(self.workspace_root.resolve())).replace("\\", "/")
+                if p.is_absolute()
+                else str(file_path).replace("\\", "/")
+            )
+        except ValueError:
+            clean_path = str(file_path).replace("\\", "/")
+
+        self._remove_file_from_indices(clean_path)
+        if backup_symbols or backup_imports:
+            self._add_file_to_indices(clean_path, backup_symbols, backup_imports)
+
+        if cached_backup is not None:
+            self._file_cache[clean_path] = cached_backup
+        else:
+            self._file_cache.pop(clean_path, None)

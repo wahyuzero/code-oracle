@@ -5,6 +5,7 @@ Generates balanced positive (PASS) and negative (REJECT) pairs across Tier 1 lan
 """
 
 import json
+import os
 import random
 import tempfile
 from dataclasses import dataclass
@@ -660,7 +661,8 @@ class DatasetGenerator:
                     elif r.label == self.negative_label and len(lang_neg) < target_neg_per_lang:
                         lang_neg.append(r)
                 tmpl_idx += 1
-                if tmpl_idx > 50:
+                max_iterations = max(50, (target_pos_per_lang + target_neg_per_lang) * 2)
+                if tmpl_idx > max_iterations:
                     break
 
             positives.extend(lang_pos)
@@ -677,7 +679,9 @@ class DatasetGenerator:
     ) -> List[DatasetRecord]:
         """
         Mine an existing codebase in Python, TypeScript, Go, or Rust,
-        discovering functions with callers to generate authentic mutation pairs.
+        discovering functions with callers to generate authentic mutation pairs
+        across 5 distinct categories (clean_pass, arity_breaking, keyword_changes,
+        circular_imports, deleted_symbol).
         """
         repo_path = repo_path.resolve()
         engine = TopoSliceEngine(workspace_root=repo_path)
@@ -708,75 +712,223 @@ class DatasetGenerator:
             except Exception:
                 continue
 
-            # 1. Clean pass mutation: add a harmless comment line inside symbol
             lines = orig_content.splitlines(keepends=True)
-            if sym.lineno <= len(lines):
-                target_idx = sym.lineno  # insert right after definition
-                comment_token = "#" if lang == "python" else "//"
-                mutated_pass = (
-                    "".join(lines[:target_idx])
-                    + f"    {comment_token} topocache-clean-pass\n"
-                    + "".join(lines[target_idx:])
+            if sym.lineno > len(lines):
+                continue
+
+            # 1. Clean pass mutation: add harmless comments/docstrings inside symbol body
+            target_idx = sym.lineno
+            if lang == "python":
+                for idx in range(sym.lineno - 1, min(len(lines), sym.lineno + 10)):
+                    l_strip = lines[idx].strip()
+                    if ":" in l_strip and not l_strip.startswith("#"):
+                        target_idx = idx + 1
+                        break
+            else:
+                for idx in range(sym.lineno - 1, min(len(lines), sym.lineno + 10)):
+                    if "{" in lines[idx]:
+                        target_idx = idx + 1
+                        break
+
+            comment_token = "#" if lang == "python" else "//"
+            mutated_pass = (
+                "".join(lines[:target_idx])
+                + f"    {comment_token} topocache-clean-pass\n"
+                + "".join(lines[target_idx:])
+            )
+            pass_rep = engine.verify(sym.file_path, mutated_pass)
+            if pass_rep.status == "APPROVED":
+                mined_records.append(
+                    DatasetRecord(
+                        input_dsl=pass_rep.linearized_subgraph,
+                        label=self.positive_label,
+                        risk_score=random.uniform(0.01, 0.15),
+                        category="clean_pass",
+                        language=lang,
+                    )
                 )
-                pass_rep = engine.verify(sym.file_path, mutated_pass)
-                if pass_rep.status == "APPROVED":
+
+            # Additional clean pass variant: docstring / second comment
+            mutated_pass2 = (
+                "".join(lines[:target_idx])
+                + f"    {comment_token} verified clean invariant\n"
+                + "".join(lines[target_idx:])
+            )
+            pass_rep2 = engine.verify(sym.file_path, mutated_pass2)
+            if pass_rep2.status == "APPROVED":
+                mined_records.append(
+                    DatasetRecord(
+                        input_dsl=pass_rep2.linearized_subgraph,
+                        label=self.positive_label,
+                        risk_score=random.uniform(0.01, 0.15),
+                        category="clean_pass",
+                        language=lang,
+                    )
+                )
+
+            # 2. Arity breaking mutation: add a required parameter breaking existing callers
+            def_line = lines[sym.lineno - 1]
+            new_def_line = None
+            if lang == "python" and f"def {sym.name}(" in def_line:
+                if "(self, " in def_line:
+                    new_def_line = def_line.replace("(self, ", "(self, required_break_arg: int, ", 1)
+                elif "(self)" in def_line:
+                    new_def_line = def_line.replace("(self)", "(self, required_break_arg: int)", 1)
+                elif "(cls, " in def_line:
+                    new_def_line = def_line.replace("(cls, ", "(cls, required_break_arg: int, ", 1)
+                elif "(cls)" in def_line:
+                    new_def_line = def_line.replace("(cls)", "(cls, required_break_arg: int)", 1)
+                else:
+                    new_def_line = def_line.replace(f"def {sym.name}(", f"def {sym.name}(required_break_arg: int, ", 1)
+            elif lang in ("typescript", "javascript") and f"{sym.name}(" in def_line:
+                new_def_line = def_line.replace(f"{sym.name}(", f"{sym.name}(requiredBreakArg: number, ", 1)
+            elif lang == "go" and f"{sym.name}(" in def_line:
+                new_def_line = def_line.replace(f"{sym.name}(", f"{sym.name}(requiredBreakArg int, ", 1)
+            elif lang == "rust" and f"fn {sym.name}(" in def_line:
+                if "&self," in def_line:
+                    new_def_line = def_line.replace("&self,", "&self, required_break_arg: i32,", 1)
+                elif "&self)" in def_line:
+                    new_def_line = def_line.replace("&self)", "&self, required_break_arg: i32)", 1)
+                elif "&mut self," in def_line:
+                    new_def_line = def_line.replace("&mut self,", "&mut self, required_break_arg: i32,", 1)
+                elif "&mut self)" in def_line:
+                    new_def_line = def_line.replace("&mut self)", "&mut self, required_break_arg: i32)", 1)
+                else:
+                    new_def_line = def_line.replace(f"fn {sym.name}(", f"fn {sym.name}(required_break_arg: i32, ", 1)
+
+            if new_def_line and new_def_line != def_line:
+                mutated_arity = "".join(lines[: sym.lineno - 1]) + new_def_line + "".join(lines[sym.lineno :])
+                arity_rep = engine.verify(sym.file_path, mutated_arity)
+                if arity_rep.status == "REJECTED":
                     mined_records.append(
                         DatasetRecord(
-                            input_dsl=pass_rep.linearized_subgraph,
-                            label=self.positive_label,
-                            risk_score=random.uniform(0.01, 0.15),
-                            category="clean_pass",
+                            input_dsl=arity_rep.linearized_subgraph,
+                            label=self.negative_label,
+                            risk_score=random.uniform(0.85, 0.98),
+                            category="arity_breaking",
                             language=lang,
                         )
                     )
 
-            # 2. Arity breaking mutation: add a required parameter breaking existing callers
-            if sym.lineno <= len(lines):
-                def_line = lines[sym.lineno - 1]
-                new_def_line = None
-                if lang == "python" and f"def {sym.name}(" in def_line:
-                    new_def_line = def_line.replace(f"def {sym.name}(", f"def {sym.name}(required_break_arg: int, ", 1)
-                elif lang in ("typescript", "javascript") and f"{sym.name}(" in def_line:
-                    new_def_line = def_line.replace(f"{sym.name}(", f"{sym.name}(requiredBreakArg: number, ", 1)
-                elif lang == "go" and f"{sym.name}(" in def_line:
-                    new_def_line = def_line.replace(f"{sym.name}(", f"{sym.name}(requiredBreakArg int, ", 1)
-                elif lang == "rust" and f"fn {sym.name}(" in def_line:
-                    if "&self," in def_line:
-                        new_def_line = def_line.replace("&self,", "&self, required_break_arg: i32,", 1)
-                    elif "&mut self," in def_line:
-                        new_def_line = def_line.replace("&mut self,", "&mut self, required_break_arg: i32,", 1)
-                    else:
-                        new_def_line = def_line.replace(f"fn {sym.name}(", f"fn {sym.name}(required_break_arg: i32, ", 1)
+            # 3. Keyword / Call Argument Mismatch mutation
+            # 3A: Callee keyword-only required argument (Python)
+            if lang == "python" and f"def {sym.name}(" in def_line:
+                new_kw_line = def_line.replace(f"def {sym.name}(", f"def {sym.name}(*, required_kw_arg: int, ", 1)
+                mutated_kw = "".join(lines[: sym.lineno - 1]) + new_kw_line + "".join(lines[sym.lineno :])
+                kw_rep = engine.verify(sym.file_path, mutated_kw)
+                if kw_rep.status == "REJECTED":
+                    mined_records.append(
+                        DatasetRecord(
+                            input_dsl=kw_rep.linearized_subgraph,
+                            label=self.negative_label,
+                            risk_score=random.uniform(0.82, 0.96),
+                            category="keyword_changes",
+                            language=lang,
+                        )
+                    )
+            # 3B: Caller callsite argument mismatch (across all languages)
+            for c in callers[:3]:
+                if not (c.caller and "::" in c.caller):
+                    continue
+                c_file, _ = c.caller.split("::", 1)
+                c_path = repo_path / c_file
+                if not c_path.exists():
+                    continue
+                try:
+                    c_lines = c_path.read_text(encoding="utf-8").splitlines(keepends=True)
+                except Exception:
+                    continue
+                if c.lineno <= len(c_lines):
+                    c_line = c_lines[c.lineno - 1]
+                    if f"{sym.name}(" in c_line:
+                        if lang == "python":
+                            new_c_line = c_line.replace(f"{sym.name}(", f"{sym.name}(unexpected_kw_arg=True, ", 1)
+                        elif lang in ("typescript", "javascript"):
+                            new_c_line = c_line.replace(f"{sym.name}(", f"{sym.name}('unexpected_arg', 99999, ", 1)
+                        else:
+                            new_c_line = c_line.replace(f"{sym.name}(", f"{sym.name}(99999, 88888, ", 1)
+                        mut_caller = "".join(c_lines[: c.lineno - 1]) + new_c_line + "".join(c_lines[c.lineno :])
+                        kw_caller_rep = engine.verify(c_file, mut_caller)
+                        if kw_caller_rep.status == "REJECTED":
+                            mined_records.append(
+                                DatasetRecord(
+                                    input_dsl=kw_caller_rep.linearized_subgraph,
+                                    label=self.negative_label,
+                                    risk_score=random.uniform(0.82, 0.96),
+                                    category="keyword_changes",
+                                    language=lang,
+                                )
+                            )
+                            break
 
-                if new_def_line and new_def_line != def_line:
-                    mutated_arity = "".join(lines[: sym.lineno - 1]) + new_def_line + "".join(lines[sym.lineno :])
-                    arity_rep = engine.verify(sym.file_path, mutated_arity)
-                    if arity_rep.status == "REJECTED":
+            # 4. Circular Import / Call Mutation
+            for c in callers[:3]:
+                if not (c.caller and "::" in c.caller):
+                    continue
+                c_file, c_sym = c.caller.split("::", 1)
+                c_name = c_sym.split(".")[-1]
+
+                # 4A: Call cycle: call the caller inside the callee
+                if c_name and c_name.isidentifier() and c_name != sym.name:
+                    call_stmt = f"    {c_name}()\n" if lang not in ("rust", "typescript", "javascript") else f"    {c_name}();\n"
+                    mut_call_circ = "".join(lines[:target_idx]) + call_stmt + "".join(lines[target_idx:])
+                    circ_rep = engine.verify(sym.file_path, mut_call_circ)
+                    if circ_rep.status == "REJECTED" and circ_rep.cycles_detected:
                         mined_records.append(
                             DatasetRecord(
-                                input_dsl=arity_rep.linearized_subgraph,
+                                input_dsl=circ_rep.linearized_subgraph,
                                 label=self.negative_label,
-                                risk_score=random.uniform(0.85, 0.98),
-                                category="arity_breaking",
+                                risk_score=random.uniform(0.88, 0.99),
+                                category="circular_imports",
                                 language=lang,
                             )
                         )
+                        break
 
-            # 3. Deleted symbol mutation: remove the symbol definition
-            if sym.lineno <= len(lines):
-                end_line = min(sym.end_lineno, len(lines))
-                mutated_del = "".join(lines[: sym.lineno - 1]) + "".join(lines[end_line:])
-                del_rep = engine.verify(sym.file_path, mutated_del)
-                if del_rep.status == "REJECTED":
-                    mined_records.append(
-                        DatasetRecord(
-                            input_dsl=del_rep.linearized_subgraph,
-                            label=self.negative_label,
-                            risk_score=random.uniform(0.85, 0.98),
-                            category="deleted_symbol",
-                            language=lang,
-                        )
+                # 4B: Import cycle: import caller module from callee file
+                if c_file != sym.file_path:
+                    mut_imp_circ = None
+                    if lang == "python" and c_file.endswith(".py"):
+                        mod_name = c_file.replace("/", ".").removesuffix(".py").removeprefix("src.")
+                        mut_imp_circ = f"import {mod_name}\n" + orig_content
+                    elif lang in ("typescript", "javascript") and c_file.endswith((".ts", ".tsx", ".js")):
+                        try:
+                            rel_imp = os.path.relpath(c_file, Path(sym.file_path).parent).replace("\\", "/")
+                            rel_imp = rel_imp.removesuffix(".ts").removesuffix(".tsx").removesuffix(".js")
+                            if not rel_imp.startswith("."):
+                                rel_imp = "./" + rel_imp
+                            mut_imp_circ = f"import * as _cycle_import from '{rel_imp}';\n" + orig_content
+                        except Exception:
+                            pass
+
+                    if mut_imp_circ:
+                        circ_rep = engine.verify(sym.file_path, mut_imp_circ)
+                        if circ_rep.status == "REJECTED" and circ_rep.cycles_detected:
+                            mined_records.append(
+                                DatasetRecord(
+                                    input_dsl=circ_rep.linearized_subgraph,
+                                    label=self.negative_label,
+                                    risk_score=random.uniform(0.88, 0.99),
+                                    category="circular_imports",
+                                    language=lang,
+                                )
+                            )
+                            break
+
+            # 5. Deleted symbol mutation: remove the symbol definition
+            end_line = min(sym.end_lineno, len(lines))
+            mutated_del = "".join(lines[: sym.lineno - 1]) + "".join(lines[end_line:])
+            del_rep = engine.verify(sym.file_path, mutated_del)
+            if del_rep.status == "REJECTED":
+                mined_records.append(
+                    DatasetRecord(
+                        input_dsl=del_rep.linearized_subgraph,
+                        label=self.negative_label,
+                        risk_score=random.uniform(0.85, 0.98),
+                        category="deleted_symbol",
+                        language=lang,
                     )
+                )
 
             if len(mined_records) >= max_samples:
                 break
@@ -789,6 +941,7 @@ class DatasetGenerator:
         num_samples: int = 100,
         val_ratio: float = 0.2,
         repo_path: Optional[Path] = None,
+        repo_paths: Optional[List[Path]] = None,
     ) -> Tuple[int, int]:
         """
         Generate complete balanced dataset and write to dataset_train.jsonl and dataset_val.jsonl.
@@ -799,10 +952,16 @@ class DatasetGenerator:
 
         all_records: List[DatasetRecord] = []
 
-        # Mine repository if provided
-        if repo_path and repo_path.exists():
-            mined = self.mine_repository(repo_path, max_samples=num_samples // 2)
-            all_records.extend(mined)
+        all_repo_paths = list(repo_paths or [])
+        if repo_path and repo_path not in all_repo_paths:
+            all_repo_paths.append(repo_path)
+
+        # Mine repositories if provided
+        for rp in all_repo_paths:
+            if rp.exists():
+                per_repo_samples = max(20, num_samples // max(1, len(all_repo_paths)))
+                mined = self.mine_repository(rp, max_samples=per_repo_samples)
+                all_records.extend(mined)
 
         # Supplement with synthetic mutations across all languages to hit target count and balance
         remaining = max(0, num_samples - len(all_records))
@@ -816,18 +975,21 @@ class DatasetGenerator:
 
         min_len = min(len(positives), len(negatives))
         if min_len > 0:
-            balanced = positives[:min_len] + negatives[:min_len]
+            chosen_pos = positives[:min_len]
+            chosen_neg = negatives[:min_len]
         else:
-            balanced = all_records
+            chosen_pos = positives
+            chosen_neg = negatives
 
-        random.shuffle(balanced)
+        # Stratified train / validation split to maintain exact class balance in both splits
+        val_pos = max(1, int(len(chosen_pos) * val_ratio)) if chosen_pos else 0
+        val_neg = max(1, int(len(chosen_neg) * val_ratio)) if chosen_neg else 0
 
-        # Train / Validation split
-        val_count = max(1, int(len(balanced) * val_ratio))
-        train_count = len(balanced) - val_count
+        val_records = chosen_pos[:val_pos] + chosen_neg[:val_neg]
+        train_records = chosen_pos[val_pos:] + chosen_neg[val_neg:]
 
-        train_records = balanced[:train_count]
-        val_records = balanced[train_count:]
+        random.shuffle(train_records)
+        random.shuffle(val_records)
 
         # Export to JSONL
         train_file = output_dir / "dataset_train.jsonl"

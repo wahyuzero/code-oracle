@@ -80,6 +80,8 @@ class TopoSliceEngine:
 
         # Save existing file cache entry for zero-side-effect transient evaluation
         cached_backup = copy.deepcopy(self.indexer._file_cache.get(norm_path))
+        backup_syms = list(self.indexer._file_symbols.get(norm_path, []))
+        backup_imps = list(self.indexer._file_imports.get(norm_path, []))
 
         try:
             # In-memory overlay of transient patched symbols and imports
@@ -137,11 +139,12 @@ class TopoSliceEngine:
             )
         finally:
             # Restore indexer to default disk state (Rollback Resilience)
-            if cached_backup is not None:
-                self.indexer._file_cache[norm_path] = cached_backup
-            else:
-                self.indexer._file_cache.pop(norm_path, None)
-            self.indexer._rebuild_indices()
+            self.indexer.restore_transient_symbols(
+                norm_path,
+                backup_syms,
+                backup_imps,
+                cached_backup,
+            )
 
     def verify_batch(
         self,
@@ -238,7 +241,11 @@ class TopoSliceEngine:
         # Save existing file cache entries for clean rollback
         all_touched_paths = set(patch_results.keys()) | set(norm_dirty.keys())
         cached_backups = {
-            path: copy.deepcopy(self.indexer._file_cache.get(path))
+            path: (
+                copy.deepcopy(self.indexer._file_cache.get(path)),
+                list(self.indexer._file_symbols.get(path, [])),
+                list(self.indexer._file_imports.get(path, [])),
+            )
             for path in all_touched_paths
         }
 
@@ -323,10 +330,11 @@ class TopoSliceEngine:
             )
         finally:
             # Restore indexer to default disk state (Rollback Resilience)
-            for path, backup in cached_backups.items():
-                if backup is not None:
-                    self.indexer._file_cache[path] = backup
-                else:
-                    self.indexer._file_cache.pop(path, None)
-            self.indexer._rebuild_indices()
+            for path, (cached_backup, backup_syms, backup_imps) in cached_backups.items():
+                self.indexer.restore_transient_symbols(
+                    path,
+                    backup_syms,
+                    backup_imps,
+                    cached_backup,
+                )
 

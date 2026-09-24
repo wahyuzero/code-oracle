@@ -215,16 +215,18 @@ def verify_symbolic_gate(
             violations.append(f"CIRCULAR_DEPENDENCY: Detected call cycle: {cycle_repr}")
 
     # 2B. Import cycle detection (direct and multi-hop across workspace)
-    import_graph: Dict[str, List[str]] = {}
-    available_files = set(indexer._file_cache.keys())
-    for f_path, f_data in indexer._file_cache.items():
-        import_graph.setdefault(f_path, [])
-        for imp_data in f_data.get("imports", []):
-            imp_obj = indexer._deserialize_import(imp_data)
-            target_f = indexer.resolve_import_to_file(imp_obj, f_path)
-            if target_f and target_f != f_path:
-                if target_f not in import_graph[f_path]:
-                    import_graph[f_path].append(target_f)
+    if hasattr(indexer, "_import_graph") and indexer._import_graph:
+        import_graph: Dict[str, List[str]] = {k: list(v) for k, v in indexer._import_graph.items()}
+    else:
+        import_graph = {}
+        for f_path, f_data in indexer._file_cache.items():
+            import_graph.setdefault(f_path, [])
+            for imp_data in f_data.get("imports", []):
+                imp_obj = indexer._deserialize_import(imp_data)
+                target_f = indexer.resolve_import_to_file(imp_obj, f_path)
+                if target_f and target_f != f_path:
+                    if target_f not in import_graph[f_path]:
+                        import_graph[f_path].append(target_f)
 
     raw_import_cycles = find_cycles_tarjan(import_graph)
     for cycle in raw_import_cycles:

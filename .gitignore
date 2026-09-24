@@ -51,3 +51,12 @@ Thumbs.db
 
 # Knowledge Graph
 graphify-out/
+
+# Mined Raw Repositories & Temporary Outputs
+mined_repos/
+/tmp/code_oracle_mined_repos/
+dataset_output/
+
+# Track Generated Datasets
+!data/
+!data/*.jsonl
