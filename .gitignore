@@ -45,3 +45,6 @@ weights/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Code Oracle Cache
+.code_oracle/
