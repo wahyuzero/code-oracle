@@ -25,6 +25,7 @@ def verify_patch(
     patch_content: str,
     workspace_dir: Optional[str] = None,
     enable_neural: Optional[bool] = None,
+    taxonomy_threshold: float = 0.5,
 ) -> Dict[str, Any]:
     """
     Lean verification endpoint for AI coding agents.
@@ -38,7 +39,11 @@ def verify_patch(
         engine.enable_neural = False
         engine.decision_head.enabled = False
 
-    report = engine.verify(file_path=file_path, patch_content=patch_content)
+    report = engine.verify(
+        file_path=file_path,
+        patch_content=patch_content,
+        taxonomy_threshold=taxonomy_threshold,
+    )
     return report.to_dict()
 
 
@@ -47,6 +52,10 @@ def run_dead_code_detection(
     paths: Optional[List[str]] = None,
     min_lines: int = 0,
     include_unexported: bool = False,
+    semantic: bool = False,
+    suppress_api: bool = False,
+    neural_semantics: Optional[bool] = None,
+    suppress_public_api: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Dead code detection endpoint for AI coding agents.
@@ -61,6 +70,10 @@ def run_dead_code_detection(
         paths=paths,
         min_lines=min_lines,
         include_unexported=include_unexported,
+        semantic=semantic,
+        suppress_api=suppress_api,
+        neural_semantics=neural_semantics,
+        suppress_public_api=suppress_public_api,
     )
     return report.to_dict()
 
@@ -107,12 +120,18 @@ def run_server():
             file_path: str,
             patch_content: str,
             neural: bool = False,
+            taxonomy_threshold: float = 0.5,
         ) -> Dict[str, Any]:
             """
             Verify code modification topology and contract invariants in sub-50ms.
             Set neural=True to activate deep Laya ModernBERT risk scoring.
             """
-            return verify_patch(file_path, patch_content, enable_neural=neural)
+            return verify_patch(
+                file_path,
+                patch_content,
+                enable_neural=neural,
+                taxonomy_threshold=taxonomy_threshold,
+            )
 
         @mcp.tool()
         def detect_dead_code(
@@ -120,6 +139,8 @@ def run_server():
             paths: Optional[List[str]] = None,
             min_lines: int = 0,
             include_unexported: bool = False,
+            neural_semantics: bool = True,
+            suppress_public_api: bool = True,
         ) -> Dict[str, Any]:
             """
             Detect unreachable, orphan, and transitively dead symbols in sub-50ms.
@@ -130,6 +151,8 @@ def run_server():
                 paths=paths,
                 min_lines=min_lines,
                 include_unexported=include_unexported,
+                neural_semantics=neural_semantics,
+                suppress_public_api=suppress_public_api,
             )
 
         @mcp.tool()

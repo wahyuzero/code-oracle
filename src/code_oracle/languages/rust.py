@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 from tree_sitter import Language, Node, Parser
 import tree_sitter_rust
 
-from code_oracle.languages.common import format_syntax_error, get_node_text
+from code_oracle.languages.common import extract_preceding_docstring, format_syntax_error, get_node_text
 from code_oracle.models import CallReference, ImportReference, Parameter, Symbol
 
 _RUST_LANG = Language(tree_sitter_rust.language())
@@ -200,6 +200,21 @@ def extract_rust_imports(source: str, file_path: str = "") -> List[ImportReferen
     return imports
 
 
+def _get_rust_visibility(node: Node, source_bytes: bytes) -> Tuple[bool, str]:
+    """Determine if a Rust node has pub visibility."""
+    vis_node = node.child_by_field_name("visibility") or next(
+        (c for c in node.children if c.type == "visibility_modifier"), None
+    )
+    if not vis_node:
+        return False, "internal"
+    vis_text = get_node_text(vis_node, source_bytes)
+    if vis_text == "pub":
+        return True, "public"
+    elif any(k in vis_text for k in ("pub(crate)", "pub(super)", "pub(self)", "pub(in ")):
+        return False, "internal"
+    return True, "public"
+
+
 def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
     """Parse Rust source into AST and extract symbol entities with detailed metadata."""
     if not source.strip():
@@ -212,6 +227,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
     symbols: List[Symbol] = []
 
     for child in tree.root_node.children:
+        docstring = extract_preceding_docstring(child, source_bytes)
+        is_exp, vis = _get_rust_visibility(child, source_bytes)
+
         if child.type == "function_item":
             name_node = child.child_by_field_name("name")
             if not name_node:
@@ -251,6 +269,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
                     calls=calls,
                     is_method=False,
                     is_static=False,
+                    docstring=docstring,
+                    is_exported=is_exp,
+                    visibility=vis,
                 )
             )
 
@@ -267,6 +288,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
                         lineno=child.start_point.row + 1,
                         end_lineno=child.end_point.row + 1,
                         signature=f"struct {s_name}",
+                        docstring=docstring,
+                        is_exported=is_exp,
+                        visibility=vis,
                     )
                 )
 
@@ -283,6 +307,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
                         lineno=child.start_point.row + 1,
                         end_lineno=child.end_point.row + 1,
                         signature=f"enum {e_name}",
+                        docstring=docstring,
+                        is_exported=is_exp,
+                        visibility=vis,
                     )
                 )
 
@@ -299,6 +326,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
                         lineno=child.start_point.row + 1,
                         end_lineno=child.end_point.row + 1,
                         signature=f"trait {t_name}",
+                        docstring=docstring,
+                        is_exported=is_exp,
+                        visibility=vis,
                     )
                 )
 
@@ -347,6 +377,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
                         ret_suffix = f" -> {ret_type}" if ret_type else ""
                         signature = f"fn {fn_name}({', '.join(param_strs)}){ret_suffix}"
 
+                        m_doc = extract_preceding_docstring(item, source_bytes)
+                        m_exp, m_vis = _get_rust_visibility(item, source_bytes)
+
                         symbols.append(
                             Symbol(
                                 name=fn_name,
@@ -364,6 +397,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
                                 is_method=is_method,
                                 is_static=is_static,
                                 bases=[trait_name] if trait_name else [],
+                                docstring=m_doc,
+                                is_exported=m_exp,
+                                visibility=m_vis,
                             )
                         )
 
@@ -386,6 +422,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
                         signature=f"{'const' if is_const else 'static'} {v_name}",
                         min_args=0,
                         max_args=0,
+                        docstring=docstring,
+                        is_exported=is_exp,
+                        visibility=vis,
                     )
                 )
 
@@ -404,6 +443,9 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
                         lineno=child.start_point.row + 1,
                         end_lineno=child.end_point.row + 1,
                         signature=f"type {t_name}",
+                        docstring=docstring,
+                        is_exported=is_exp,
+                        visibility=vis,
                     )
                 )
 
@@ -424,6 +466,8 @@ def extract_rust_symbols(source: str, file_path: str = "") -> List[Symbol]:
             end_lineno=line_count,
             signature=f"// module {file_path}",
             calls=module_calls,
+            is_exported=True,
+            visibility="public",
         )
         symbols.append(module_sym)
 

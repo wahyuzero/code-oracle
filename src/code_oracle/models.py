@@ -62,6 +62,9 @@ class Symbol:
     is_method: bool = False
     is_static: bool = False
     bases: List[str] = field(default_factory=list)
+    docstring: Optional[str] = None
+    is_exported: bool = False
+    visibility: str = "internal"
 
     @property
     def id(self) -> str:
@@ -158,3 +161,75 @@ class VerificationReport:
             "affected_symbols": self.affected_symbols,
             "latency_ms": round(self.latency_ms, 2),
         }
+
+
+@dataclass
+class RiskTaxonomyScores:
+    """Multi-label risk taxonomy probabilities."""
+    breaking_public_api: float = 0.0
+    security_surface: float = 0.0
+    concurrency_hazard: float = 0.0
+    performance_regression: float = 0.0
+    silent_logic_drift: float = 0.0
+
+    def active_categories(self, threshold: float = 0.5) -> List[str]:
+        """Return list of active risk categories exceeding threshold."""
+        categories = []
+        if self.breaking_public_api >= threshold:
+            categories.append("BreakingPublicAPI")
+        if self.security_surface >= threshold:
+            categories.append("SecuritySurface")
+        if self.concurrency_hazard >= threshold:
+            categories.append("ConcurrencyHazard")
+        if self.performance_regression >= threshold:
+            categories.append("PerformanceRegression")
+        if self.silent_logic_drift >= threshold:
+            categories.append("SilentLogicDrift")
+        return categories
+
+    def to_dict(self) -> Dict[str, float]:
+        return {
+            "breaking_public_api": round(self.breaking_public_api, 4),
+            "security_surface": round(self.security_surface, 4),
+            "concurrency_hazard": round(self.concurrency_hazard, 4),
+            "performance_regression": round(self.performance_regression, 4),
+            "silent_logic_drift": round(self.silent_logic_drift, 4),
+        }
+
+
+@dataclass
+class EnhancedVerificationReport:
+    """
+    Backward-compatible verification report featuring Multi-Task Risk Taxonomy
+    and Epistemic Uncertainty Estimation.
+    """
+    status: str  # "APPROVED" | "REJECTED"
+    confidence: float  # Calibrated epistemic confidence [0.0 - 1.0]
+    risk_score: float  # Continuous calibrated risk [0.0 - 1.0]
+    epistemic_uncertainty: float  # Predicted variance sigma^2
+    risk_taxonomy: RiskTaxonomyScores
+    active_risk_categories: List[str]
+    cycles_detected: List[List[str]]
+    invariant_violations: List[str]
+    linearized_subgraph: str
+    affected_symbols: List[str]
+    latency_ms: float
+    is_neural_calibrated: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert report to JSON-serializable dictionary with backward compatibility."""
+        return {
+            "status": self.status,
+            "confidence": round(self.confidence, 4),
+            "risk_score": round(self.risk_score, 4),
+            "epistemic_uncertainty": round(self.epistemic_uncertainty, 4),
+            "risk_taxonomy": self.risk_taxonomy.to_dict(),
+            "active_risk_categories": self.active_risk_categories,
+            "cycles_detected": self.cycles_detected,
+            "invariant_violations": self.invariant_violations,
+            "linearized_subgraph": self.linearized_subgraph,
+            "affected_symbols": self.affected_symbols,
+            "latency_ms": round(self.latency_ms, 2),
+            "is_neural_calibrated": self.is_neural_calibrated,
+        }
+

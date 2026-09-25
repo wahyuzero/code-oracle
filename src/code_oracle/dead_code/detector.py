@@ -7,10 +7,11 @@ isolating direct orphans (in-degree == 0) and transitive dead clusters.
 from collections import deque
 from pathlib import Path
 import time
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from code_oracle.dead_code.entrypoints import EntrypointDetector
-from code_oracle.dead_code.models import DeadCodeReport, DeadSymbol
+from code_oracle.dead_code.models import DeadCodeReport, DeadSymbol, SemanticDeadSymbol
+from code_oracle.dead_code.semantics import DeadCodeSemanticsClassifier
 from code_oracle.indexer import WorkspaceIndexer
 from code_oracle.models import Symbol
 
@@ -134,10 +135,21 @@ class DeadCodeDetector:
         paths: Optional[List[str]] = None,
         min_lines: int = 0,
         include_unexported: bool = False,
+        semantic: bool = False,
+        suppress_api: bool = False,
+        neural_semantics: Optional[bool] = None,
+        suppress_public_api: Optional[bool] = None,
     ) -> DeadCodeReport:
         """
         Execute full workspace reachability analysis and return dead code report.
         """
+        if neural_semantics is not None:
+            semantic = neural_semantics
+        if suppress_public_api is not None:
+            suppress_api = suppress_public_api
+        if suppress_api:
+            semantic = True
+
         start_time = time.perf_counter()
 
         # Ensure index is updated
@@ -262,6 +274,7 @@ class DeadCodeDetector:
 
         # 6. Classify direct orphans and transitive dead clusters
         dead_symbols: List[DeadSymbol] = []
+        candidate_pairs: List[Tuple[Symbol, DeadSymbol]] = []
 
         for sym in dead_candidates:
             # Check visibility
@@ -296,32 +309,43 @@ class DeadCodeDetector:
                 else:
                     reason = f"Transitive dead symbol: only called by unreachable symbols (cluster: {cluster_id})"
 
-            dead_symbols.append(
-                DeadSymbol(
-                    id=sym.id,
-                    name=sym.name,
-                    qualname=sym.qualname,
-                    file_path=sym.file_path,
-                    kind=sym.kind,
-                    lineno=sym.lineno,
-                    end_lineno=sym.end_lineno,
-                    is_orphan=is_orphan,
-                    is_transitive=is_transitive,
-                    cluster_id=cluster_id,
-                    confidence=1.0,
-                    reason=reason,
-                )
+            d_sym = DeadSymbol(
+                id=sym.id,
+                name=sym.name,
+                qualname=sym.qualname,
+                file_path=sym.file_path,
+                kind=sym.kind,
+                lineno=sym.lineno,
+                end_lineno=sym.end_lineno,
+                is_orphan=is_orphan,
+                is_transitive=is_transitive,
+                cluster_id=cluster_id,
+                confidence=1.0,
+                reason=reason,
             )
+            dead_symbols.append(d_sym)
+            candidate_pairs.append((sym, d_sym))
+
+        suppressed_symbols: List[SemanticDeadSymbol] = []
+        if semantic:
+            classifier = DeadCodeSemanticsClassifier()
+            active_symbols, suppressed_symbols = classifier.classify_candidates(
+                candidate_pairs,
+                suppress_public_api=suppress_api,
+            )
+            dead_symbols = active_symbols
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         # Sort dead symbols by file path and line number
         dead_symbols.sort(key=lambda s: (s.file_path, s.lineno))
+        suppressed_symbols.sort(key=lambda s: (s.file_path, s.lineno))
 
         return DeadCodeReport(
             workspace_root=str(self.workspace_root),
             total_symbols_scanned=len(all_symbols),
             dead_symbols=dead_symbols,
+            suppressed_symbols=suppressed_symbols,
             roots_count=len(roots),
             scanned_files_count=len(self.indexer._file_cache),
             latency_ms=elapsed_ms,
@@ -334,6 +358,10 @@ def detect_dead_code(
     paths: Optional[List[str]] = None,
     min_lines: int = 0,
     include_unexported: bool = False,
+    semantic: bool = False,
+    suppress_api: bool = False,
+    neural_semantics: Optional[bool] = None,
+    suppress_public_api: Optional[bool] = None,
 ) -> DeadCodeReport:
     """Top-level convenience function to detect dead code."""
     detector = DeadCodeDetector(workspace_root=workspace_root, indexer=indexer)
@@ -341,4 +369,8 @@ def detect_dead_code(
         paths=paths,
         min_lines=min_lines,
         include_unexported=include_unexported,
+        semantic=semantic,
+        suppress_api=suppress_api,
+        neural_semantics=neural_semantics,
+        suppress_public_api=suppress_public_api,
     )

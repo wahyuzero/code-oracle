@@ -4,7 +4,7 @@ Preserves 100% fidelity and backward compatibility for Python verification.
 """
 
 import ast
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from code_oracle.models import CallReference, ImportReference, Parameter, Symbol
 
@@ -85,6 +85,18 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
         return []
 
     symbols: List[Symbol] = []
+
+    # Check for module-level __all__
+    all_names: Optional[Set[str]] = None
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name) and target.id == "__all__":
+                    if isinstance(stmt.value, (ast.List, ast.Tuple, ast.Set)):
+                        all_names = {
+                            elt.value for elt in stmt.value.elts
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                        }
 
     def process_body(nodes: List[ast.stmt], parent_qualname: Optional[str] = None, is_parent_class: bool = False):
         for node in nodes:
@@ -180,6 +192,36 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
                 sym_id = f"{file_path}::{qualname}"
                 calls = _extract_calls_from_node(node, caller_id=sym_id)
 
+                # Docstring and export visibility
+                docstring = ast.get_docstring(node)
+                if parent_qualname and not is_parent_class:
+                    is_exported = False
+                    visibility = "private"
+                elif is_parent_class:
+                    if node.name.startswith("__") and not node.name.endswith("__"):
+                        visibility = "private"
+                        is_exported = False
+                    elif node.name.startswith("_"):
+                        visibility = "internal"
+                        is_exported = False
+                    else:
+                        visibility = "public"
+                        is_exported = True
+                else:
+                    if all_names is not None:
+                        is_exported = node.name in all_names
+                        visibility = "public" if is_exported else ("private" if node.name.startswith("__") else ("internal" if node.name.startswith("_") else "public"))
+                    else:
+                        if node.name.startswith("__") and not node.name.endswith("__"):
+                            visibility = "private"
+                            is_exported = False
+                        elif node.name.startswith("_"):
+                            visibility = "internal"
+                            is_exported = False
+                        else:
+                            visibility = "public"
+                            is_exported = True
+
                 symbol = Symbol(
                     name=node.name,
                     qualname=qualname,
@@ -197,6 +239,9 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
                     calls=calls,
                     is_method=is_method,
                     is_static=is_static,
+                    docstring=docstring,
+                    is_exported=is_exported,
+                    visibility=visibility,
                 )
                 symbols.append(symbol)
                 process_body(node.body, parent_qualname=qualname, is_parent_class=False)
@@ -209,6 +254,21 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
                 sym_id = f"{file_path}::{qualname}"
                 calls = _extract_calls_from_node(node, caller_id=sym_id)
 
+                docstring = ast.get_docstring(node)
+                if all_names is not None:
+                    is_exported = node.name in all_names
+                    visibility = "public" if is_exported else ("private" if node.name.startswith("__") else ("internal" if node.name.startswith("_") else "public"))
+                else:
+                    if node.name.startswith("__") and not node.name.endswith("__"):
+                        visibility = "private"
+                        is_exported = False
+                    elif node.name.startswith("_"):
+                        visibility = "internal"
+                        is_exported = False
+                    else:
+                        visibility = "public"
+                        is_exported = True
+
                 symbol = Symbol(
                     name=node.name,
                     qualname=qualname,
@@ -219,6 +279,9 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
                     signature=signature,
                     calls=calls,
                     bases=bases_list,
+                    docstring=docstring,
+                    is_exported=is_exported,
+                    visibility=visibility,
                 )
                 symbols.append(symbol)
                 process_body(node.body, parent_qualname=qualname, is_parent_class=True)
@@ -231,6 +294,7 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
     ]
     if module_calls:
         line_count = len(source.splitlines()) or 1
+        module_doc = ast.get_docstring(tree)
         module_sym = Symbol(
             name="<module>",
             qualname="<module>",
@@ -240,6 +304,9 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
             end_lineno=line_count,
             signature=f"# module {file_path}",
             calls=module_calls,
+            docstring=module_doc,
+            is_exported=True,
+            visibility="public",
         )
         symbols.append(module_sym)
 

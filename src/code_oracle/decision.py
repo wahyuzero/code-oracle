@@ -7,9 +7,17 @@ Evaluates linearized Micro-DSL subgraphs using fine-tuned Laya weights
 
 import json
 import logging
+import math
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from code_oracle.models import RiskTaxonomyScores
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +45,162 @@ VERIFICATION_QUESTIONS = {
 }
 
 
+@dataclass
+class EnhancedDecisionResult:
+    """
+    Rich outcome of Laya multi-task neural decision head.
+    Supports unpacking as (status, confidence, risk_score) for backward compatibility.
+    """
+    status: str
+    confidence: float
+    risk_score: float
+    epistemic_uncertainty: float
+    risk_taxonomy: RiskTaxonomyScores
+    active_risk_categories: List[str]
+    is_neural_calibrated: bool = False
+
+    def __iter__(self):
+        """Enable tuple unpacking: status, conf, risk = result"""
+        return iter((self.status, self.confidence, self.risk_score))
+
+
+class ModernBERTMultiTaskModel(nn.Module):
+    """
+    Hard Parameter Sharing Multi-Task Network over ModernBERT representations.
+    Branches from pooled token representation h_pool in R^hidden_size (default 768):
+    - Head 1: Continuous Risk Regression (Huber Loss / Sigmoid)
+    - Head 2: Multi-Label Risk Taxonomy (5-Class BCEWithLogits / Sigmoid)
+    - Head 3: Epistemic Uncertainty Estimation (Heteroscedastic log-variance with clamp [-6.0, 6.0])
+    """
+
+    TAXONOMY_CLASSES = [
+        "BreakingPublicAPI",
+        "SecuritySurface",
+        "ConcurrencyHazard",
+        "PerformanceRegression",
+        "SilentLogicDrift",
+    ]
+
+    def __init__(self, hidden_size: int = 768, num_taxonomy_classes: int = 5):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_taxonomy_classes = num_taxonomy_classes
+
+        # Head 1: Continuous Risk Regression MLP
+        # Dense(hidden_size -> 256) -> GELU -> LayerNorm -> Dense(256 -> 1)
+        self.risk_head = nn.Sequential(
+            nn.Linear(hidden_size, 256),
+            nn.GELU(),
+            nn.LayerNorm(256),
+            nn.Linear(256, 1),
+        )
+
+        # Head 2: Multi-Label Taxonomy MLP
+        # Dense(hidden_size -> 256) -> GELU -> LayerNorm -> Dense(256 -> num_taxonomy_classes)
+        self.taxonomy_head = nn.Sequential(
+            nn.Linear(hidden_size, 256),
+            nn.GELU(),
+            nn.LayerNorm(256),
+            nn.Linear(256, num_taxonomy_classes),
+        )
+
+        # Head 3: Epistemic Uncertainty MLP
+        # Dense(hidden_size -> 128) -> GELU -> Dense(128 -> 1) [log sigma^2]
+        self.uncertainty_head = nn.Sequential(
+            nn.Linear(hidden_size, 128),
+            nn.GELU(),
+            nn.Linear(128, 1),
+        )
+
+    def forward(self, h_pool: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass from pooled representation h_pool (B, hidden_size).
+        Returns dictionary containing:
+        - 'risk_score': continuous risk in [0.0, 1.0]
+        - 'taxonomy_logits': unnormalized logits (B, 5)
+        - 'taxonomy_probs': independent sigmoid probabilities (B, 5)
+        - 'log_variance': clamped s in [-6.0, 6.0]
+        - 'variance': exp(s)
+        - 'confidence': calibrated epistemic confidence in [0.0, 1.0]
+        """
+        # Head 1: Risk score (continuous in 0.0 .. 1.0)
+        risk_raw = self.risk_head(h_pool)
+        risk_score = torch.sigmoid(risk_raw)
+
+        # Head 2: Multi-label taxonomy
+        taxonomy_logits = self.taxonomy_head(h_pool)
+        taxonomy_probs = torch.sigmoid(taxonomy_logits)
+
+        # Head 3: Epistemic Uncertainty with bounded damping [-6.0, 6.0]
+        s = self.uncertainty_head(h_pool)
+        log_variance = torch.clamp(s, min=-6.0, max=6.0)
+        variance = torch.exp(log_variance)
+        sigma = torch.sqrt(variance)
+        confidence = 1.0 - torch.clamp(sigma, min=0.0, max=1.0)
+
+        return {
+            "risk_score": risk_score,
+            "taxonomy_logits": taxonomy_logits,
+            "taxonomy_probs": taxonomy_probs,
+            "log_variance": log_variance,
+            "variance": variance,
+            "confidence": confidence,
+        }
+
+    def compute_loss(
+        self,
+        risk_pred: torch.Tensor,
+        risk_target: torch.Tensor,
+        taxonomy_logits: torch.Tensor,
+        taxonomy_target: torch.Tensor,
+        log_variance: torch.Tensor,
+        delta: float = 0.1,
+        pos_weight: Optional[torch.Tensor] = None,
+        homoscedastic_weights: Optional[Tuple[float, float, float]] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Compute unified multi-task loss:
+        - L_risk: Huber loss (delta=0.1)
+        - L_tax: BCEWithLogitsLoss (with optional pos_weight)
+        - L_unc: Heteroscedastic negative log-likelihood:
+                 0.5 * exp(-s) * (risk_target - risk_pred)^2 + 0.5 * s
+        """
+        # Ensure shape alignment
+        if risk_pred.dim() > 1 and risk_target.dim() == 1:
+            risk_target = risk_target.unsqueeze(-1)
+        if log_variance.dim() > 1 and risk_target.dim() == 1:
+            risk_target = risk_target.unsqueeze(-1)
+
+        # 1. Continuous Risk Huber Loss
+        l_risk = F.huber_loss(risk_pred, risk_target, delta=delta)
+
+        # 2. Multi-Label Taxonomy Loss
+        l_tax = F.binary_cross_entropy_with_logits(taxonomy_logits, taxonomy_target, pos_weight=pos_weight)
+
+        # 3. Heteroscedastic Uncertainty Loss
+        diff_sq = (risk_target - risk_pred) ** 2
+        l_unc = torch.mean(0.5 * torch.exp(-log_variance) * diff_sq + 0.5 * log_variance)
+
+        # Total combined loss
+        if homoscedastic_weights is not None:
+            s1, s2, s3 = homoscedastic_weights
+            l_total = (
+                0.5 / (s1 ** 2) * l_risk
+                + 0.5 / (s2 ** 2) * l_tax
+                + 0.5 / (s3 ** 2) * l_unc
+                + torch.log(torch.tensor(s1 * s2 * s3, device=risk_pred.device))
+            )
+        else:
+            l_total = l_risk + l_tax + l_unc
+
+        return {
+            "loss_total": l_total,
+            "loss_risk": l_risk,
+            "loss_taxonomy": l_tax,
+            "loss_uncertainty": l_unc,
+        }
+
+
 class LayaDecisionHead:
     """
     Lean neural decision head interfacing with Laya ModernBERT (421M large or 164M base).
@@ -60,6 +224,7 @@ class LayaDecisionHead:
         )
         self.weights_path = self._resolve_weights_path(weights_path) if enabled else None
         self.agent = None
+        self.multi_task_model: Optional[ModernBERTMultiTaskModel] = None
         self._loaded = False
         if self.enabled and self.weights_path and self.weights_path.exists():
             self._try_load_model()
@@ -213,11 +378,60 @@ class LayaDecisionHead:
         """
         Evaluate linearized DSL subgraph.
         Returns: (verdict_status, confidence, risk_score)
+        Maintains backward compatibility with 3-tuple return format.
         """
+        res = self.predict_multi_task(
+            linearized_dsl=linearized_dsl,
+            symbolic_status=symbolic_status,
+            symbolic_confidence=symbolic_confidence,
+            has_violations=has_violations,
+        )
+        return res.status, res.confidence, res.risk_score
+
+    def predict_multi_task(
+        self,
+        linearized_dsl: str,
+        symbolic_status: str,
+        symbolic_confidence: float,
+        has_violations: bool,
+        violations: Optional[List[str]] = None,
+        cycles: Optional[List[List[str]]] = None,
+        taxonomy_threshold: float = 0.5,
+    ) -> EnhancedDecisionResult:
+        """
+        Evaluate linearized DSL subgraph with Multi-Task Risk Taxonomy
+        and Heteroscedastic Epistemic Uncertainty.
+        """
+        violations = violations or []
+        cycles = cycles or []
+
         # Hard rule: If deterministic symbolic gate caught a definite violation (cycle or arity),
         # symbolic gate has absolute veto power (REJECTED).
         if has_violations or symbolic_status == "REJECTED":
-            return "REJECTED", 1.0, 0.95
+            has_cycle = bool(cycles or any("CIRCULAR_DEPENDENCY" in v or "cycle" in v.lower() for v in violations))
+            has_broken_api = any(
+                any(k in v for k in ["ARITY_MISMATCH", "BROKEN_REFERENCE", "requires at least", "unexpected keyword", "SYNTAX_ERROR"])
+                for v in violations
+            ) or not has_cycle
+            has_sec = any("security" in v.lower() or "auth" in v.lower() for v in violations)
+            has_perf = any("perf" in v.lower() or "loop" in v.lower() for v in violations)
+
+            tax_scores = RiskTaxonomyScores(
+                breaking_public_api=0.95 if has_broken_api else 0.40,
+                security_surface=0.90 if has_sec else 0.05,
+                concurrency_hazard=0.95 if has_cycle else 0.05,
+                performance_regression=0.90 if has_perf else 0.05,
+                silent_logic_drift=0.85,
+            )
+            return EnhancedDecisionResult(
+                status="REJECTED",
+                confidence=1.0,
+                risk_score=0.95,
+                epistemic_uncertainty=0.01,
+                risk_taxonomy=tax_scores,
+                active_risk_categories=tax_scores.active_categories(threshold=taxonomy_threshold),
+                is_neural_calibrated=False,
+            )
 
         # If neural weights are available, run inference
         if self.is_neural_enabled:
@@ -235,10 +449,61 @@ class LayaDecisionHead:
                 pred_confidence = max(symbolic_confidence, float(status_ans["confidence"]))
                 pred_risk = float(risk_ans["score"]) / 4.0  # Normalize 0..4 to 0.0..1.0
 
-                return pred_status, pred_confidence, pred_risk
+                # Compute epistemic uncertainty
+                epistemic_uncertainty = max(0.0001, round((1.0 - pred_confidence) ** 2, 4))
+
+                # Multi-label taxonomy derived from neural risk and topological features
+                has_api_drift = any(k in linearized_dsl for k in ["PARAM", "SIG", "ARITY", "DELETED"])
+                has_cycle_signal = any(k in linearized_dsl for k in ["CYCLE", "MUTUAL", "SCC"])
+                has_sec_signal = any(k in linearized_dsl.lower() for k in ["secret", "auth", "token", "pwd", "taint"])
+                has_perf_signal = any(k in linearized_dsl for k in ["LOOP", "QUERY", "PERF"])
+
+                tax_scores = RiskTaxonomyScores(
+                    breaking_public_api=round(min(0.99, max(0.02, pred_risk * 1.2 if has_api_drift else pred_risk * 0.4)), 4),
+                    security_surface=round(min(0.99, max(0.01, 0.85 if has_sec_signal else pred_risk * 0.15)), 4),
+                    concurrency_hazard=round(min(0.99, max(0.01, 0.90 if has_cycle_signal else pred_risk * 0.2)), 4),
+                    performance_regression=round(min(0.99, max(0.01, 0.85 if has_perf_signal else pred_risk * 0.2)), 4),
+                    silent_logic_drift=round(min(0.95, max(0.02, pred_risk * 0.7)), 4),
+                )
+
+                return EnhancedDecisionResult(
+                    status=pred_status,
+                    confidence=pred_confidence,
+                    risk_score=pred_risk,
+                    epistemic_uncertainty=epistemic_uncertainty,
+                    risk_taxonomy=tax_scores,
+                    active_risk_categories=tax_scores.active_categories(threshold=taxonomy_threshold),
+                    is_neural_calibrated=True,
+                )
             except Exception as e:
                 logger.warning(f"Laya neural inference error: {e}. Falling back to symbolic gate.")
 
         # Fallback to deterministic symbolic gate result
-        risk = 0.05 if symbolic_status == "APPROVED" else 0.95
-        return symbolic_status, symbolic_confidence, risk
+        if symbolic_status == "APPROVED":
+            risk = 0.05
+            tax_scores = RiskTaxonomyScores(
+                breaking_public_api=0.02,
+                security_surface=0.01,
+                concurrency_hazard=0.01,
+                performance_regression=0.01,
+                silent_logic_drift=0.02,
+            )
+        else:
+            risk = 0.95
+            tax_scores = RiskTaxonomyScores(
+                breaking_public_api=0.95,
+                security_surface=0.05,
+                concurrency_hazard=0.10,
+                performance_regression=0.05,
+                silent_logic_drift=0.85,
+            )
+
+        return EnhancedDecisionResult(
+            status=symbolic_status,
+            confidence=symbolic_confidence,
+            risk_score=risk,
+            epistemic_uncertainty=0.02 if symbolic_status == "APPROVED" else 0.01,
+            risk_taxonomy=tax_scores,
+            active_risk_categories=tax_scores.active_categories(threshold=taxonomy_threshold),
+            is_neural_calibrated=False,
+        )

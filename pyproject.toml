@@ -35,3 +35,6 @@ dev = [
 
 [project.scripts]
 code-oracle = "code_oracle.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

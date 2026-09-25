@@ -38,12 +38,20 @@ def format_report_pretty(report_dict: dict) -> str:
 
     risk = report_dict.get("risk_score")
     risk_str = f" | Risk Score: {risk:.4f}" if risk is not None else ""
+    unc = report_dict.get("epistemic_uncertainty")
+    unc_str = f" | Uncertainty: {unc:.4f}" if unc is not None else ""
 
     lines = [
         f"{color_prefix}===================================================={color_reset}",
-        f"{color_prefix} VERDICT: {status} (Confidence: {conf}{risk_str}) in {latency} ms{color_reset}",
+        f"{color_prefix} VERDICT: {status} (Confidence: {conf}{risk_str}{unc_str}) in {latency} ms{color_reset}",
         f"{color_prefix}===================================================={color_reset}",
     ]
+
+    active_cats = report_dict.get("active_risk_categories", [])
+    if active_cats:
+        lines.append("\nActive Risk Categories:")
+        for cat in active_cats:
+            lines.append(f"  \033[93m⚠\033[0m {cat}")
 
     violations = report_dict.get("invariant_violations", [])
     if violations:
@@ -94,7 +102,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
         workspace_root=Path(args.workspace) if args.workspace else None,
         enable_neural=getattr(args, "neural", None),
     )
-    report = engine.verify(file_path=file_path, patch_content=patch_content, k=args.k)
+    report = engine.verify(
+        file_path=file_path,
+        patch_content=patch_content,
+        k=args.k,
+        taxonomy_threshold=getattr(args, "taxonomy_threshold", 0.5),
+    )
     report_dict = report.to_dict()
 
     if args.json:
@@ -214,6 +227,8 @@ def cmd_dead_code(args: argparse.Namespace) -> int:
         paths=args.paths if args.paths else None,
         min_lines=args.min_lines,
         include_unexported=args.include_unexported,
+        semantic=getattr(args, "semantic", False),
+        suppress_api=getattr(args, "suppress_api", False),
     )
 
     fmt = "json" if getattr(args, "json", False) else args.format
@@ -452,6 +467,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Disable Laya ModernBERT neural decision head (pure symbolic mode)",
     )
+    p_verify.add_argument(
+        "--taxonomy-threshold",
+        type=float,
+        default=0.5,
+        help="Probability threshold to activate risk taxonomy categories (default: 0.5)",
+    )
     p_verify.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_verify.set_defaults(func=cmd_verify)
 
@@ -507,6 +528,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Include unexported (private) symbols in dead code detection",
+    )
+    p_dead.add_argument(
+        "--semantic",
+        action="store_true",
+        default=False,
+        help="Enable embedded dead code semantics classification (Stage 1 pruner + Stage 2 classifier)",
+    )
+    p_dead.add_argument(
+        "--suppress-api",
+        "--suppress-public-api",
+        dest="suppress_api",
+        action="store_true",
+        default=False,
+        help="Suppress public library API surfaces from dead code report",
     )
     p_dead.add_argument(
         "--json",

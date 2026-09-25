@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 from tree_sitter import Language, Node, Parser
 import tree_sitter_go
 
-from code_oracle.languages.common import format_syntax_error, get_node_text
+from code_oracle.languages.common import extract_preceding_docstring, format_syntax_error, get_node_text
 from code_oracle.models import CallReference, ImportReference, Parameter, Symbol
 
 _GO_LANG = Language(tree_sitter_go.language())
@@ -188,6 +188,7 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
     symbols: List[Symbol] = []
 
     for child in tree.root_node.children:
+        docstring = extract_preceding_docstring(child, source_bytes)
         if child.type == "function_declaration":
             name_node = child.child_by_field_name("name")
             if not name_node:
@@ -212,6 +213,9 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
             ret_suffix = f" {ret_type}" if ret_type else ""
             signature = f"func {fn_name}({', '.join(param_strs)}){ret_suffix}"
 
+            is_exp = bool(fn_name and fn_name[0].isupper())
+            vis = "public" if is_exp else "internal"
+
             symbols.append(
                 Symbol(
                     name=fn_name,
@@ -228,6 +232,9 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
                     calls=calls,
                     is_method=False,
                     is_static=False,
+                    docstring=docstring,
+                    is_exported=is_exp,
+                    visibility=vis,
                 )
             )
 
@@ -278,6 +285,9 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
             ret_suffix = f" {ret_type}" if ret_type else ""
             signature = f"func ({recv_var} *{recv_type}) {method_name}({', '.join(param_strs)}){ret_suffix}"
 
+            is_exp = bool(method_name and method_name[0].isupper() and (not recv_type or recv_type == "unknown" or recv_type[0].isupper()))
+            vis = "public" if is_exp else "internal"
+
             symbols.append(
                 Symbol(
                     name=method_name,
@@ -294,6 +304,9 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
                     calls=calls,
                     is_method=True,
                     is_static=False,
+                    docstring=docstring,
+                    is_exported=is_exp,
+                    visibility=vis,
                 )
             )
 
@@ -310,6 +323,10 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
                             kind = "interface"
                         else:
                             kind = "type_alias"
+
+                        is_exp = bool(t_name and t_name[0].isupper())
+                        vis = "public" if is_exp else "internal"
+
                         symbols.append(
                             Symbol(
                                 name=t_name,
@@ -319,6 +336,9 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
                                 lineno=child.start_point.row + 1,
                                 end_lineno=child.end_point.row + 1,
                                 signature=f"type {t_name} {kind}",
+                                docstring=docstring,
+                                is_exported=is_exp,
+                                visibility=vis,
                             )
                         )
 
@@ -331,6 +351,8 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
                     for sc in spec.children:
                         if sc.type == "identifier":
                             v_name = get_node_text(sc, source_bytes)
+                            is_exp = bool(v_name and v_name[0].isupper())
+                            vis = "public" if is_exp else "internal"
                             symbols.append(
                                 Symbol(
                                     name=v_name,
@@ -342,6 +364,9 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
                                     signature=f"{'const' if is_const else 'var'} {v_name}",
                                     min_args=0,
                                     max_args=0,
+                                    docstring=docstring,
+                                    is_exported=is_exp,
+                                    visibility=vis,
                                 )
                             )
 
@@ -362,6 +387,8 @@ def extract_go_symbols(source: str, file_path: str = "") -> List[Symbol]:
             end_lineno=line_count,
             signature=f"// package {file_path}",
             calls=module_calls,
+            is_exported=True,
+            visibility="public",
         )
         symbols.append(module_sym)
 

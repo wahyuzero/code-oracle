@@ -14,7 +14,7 @@ from code_oracle.decision import LayaDecisionHead
 from code_oracle.indexer import WorkspaceIndexer
 from code_oracle.linearizer import linearize_subgraph
 from code_oracle.locator import extract_imports_from_ast, extract_symbols_from_ast, locate_affected_symbols
-from code_oracle.models import PatchResult, VerificationReport
+from code_oracle.models import EnhancedVerificationReport, PatchResult, RiskTaxonomyScores, VerificationReport
 from code_oracle.slicer import slice_neighborhood
 from code_oracle.symbolic import verify_symbolic_gate
 
@@ -57,10 +57,12 @@ class TopoSliceEngine:
         patch_content: str,
         k: int = 1,
         max_fanout: int = 20,
-    ) -> VerificationReport:
+        taxonomy_threshold: float = 0.5,
+    ) -> EnhancedVerificationReport:
         """
         Verify a code patch proposal against AST topology and contract invariants.
-        Returns a VerificationReport with structured verdict and sub-400 token DSL.
+        Returns an EnhancedVerificationReport with structured verdict, sub-400 token DSL,
+        Multi-Task Risk Taxonomy, and Epistemic Uncertainty Estimation.
         """
         start_time = time.perf_counter()
 
@@ -89,15 +91,20 @@ class TopoSliceEngine:
         if patch_result.syntax_error:
             elapsed_ms = (time.perf_counter() - start_time) * 1000.0
             violation_msg = f"SYNTAX_ERROR: {patch_result.syntax_error}"
-            return VerificationReport(
+            tax_scores = RiskTaxonomyScores(breaking_public_api=0.95, silent_logic_drift=0.90)
+            return EnhancedVerificationReport(
                 status="REJECTED",
                 confidence=1.0,
                 risk_score=1.0,
+                epistemic_uncertainty=0.01,
+                risk_taxonomy=tax_scores,
+                active_risk_categories=tax_scores.active_categories(threshold=taxonomy_threshold),
                 cycles_detected=[],
                 invariant_violations=[violation_msg],
                 linearized_subgraph=f"[DIFF_TARGET] {norm_path} (SYNTAX_ERROR)\n[GATE]\nSTATUS: REJECTED\nVIOLATIONS:\n  - {violation_msg}",
                 affected_symbols=[],
                 latency_ms=elapsed_ms,
+                is_neural_calibrated=False,
             )
 
         # Stage 2: Workspace Indexer (incremental update)
@@ -151,25 +158,32 @@ class TopoSliceEngine:
                 max_tokens=400,
             )
 
-            # Stage 6: Decision Head / Risk Calibration
-            final_status, final_conf, final_risk = self.decision_head.predict(
+            # Stage 6: Decision Head / Risk Calibration & Multi-Task Taxonomy
+            decision_res = self.decision_head.predict_multi_task(
                 linearized_dsl=linearized_dsl,
                 symbolic_status=gate_result.status,
                 symbolic_confidence=gate_result.confidence,
                 has_violations=bool(gate_result.violations or gate_result.cycles),
+                violations=gate_result.violations,
+                cycles=gate_result.cycles,
+                taxonomy_threshold=taxonomy_threshold,
             )
 
             elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
-            return VerificationReport(
-                status=final_status,
-                confidence=final_conf,
-                risk_score=final_risk,
+            return EnhancedVerificationReport(
+                status=decision_res.status,
+                confidence=decision_res.confidence,
+                risk_score=decision_res.risk_score,
+                epistemic_uncertainty=decision_res.epistemic_uncertainty,
+                risk_taxonomy=decision_res.risk_taxonomy,
+                active_risk_categories=decision_res.active_risk_categories,
                 cycles_detected=gate_result.cycles,
                 invariant_violations=gate_result.violations,
                 linearized_subgraph=linearized_dsl,
                 affected_symbols=[s.qualname for s in seed_symbols],
                 latency_ms=elapsed_ms,
+                is_neural_calibrated=decision_res.is_neural_calibrated,
             )
         finally:
             # Restore indexer to default disk state (Rollback Resilience)
@@ -186,7 +200,8 @@ class TopoSliceEngine:
         dirty_overlays: Optional[Dict[str, str]] = None,
         k: int = 1,
         max_fanout: int = 20,
-    ) -> VerificationReport:
+        taxonomy_threshold: float = 0.5,
+    ) -> EnhancedVerificationReport:
         """
         Atomically verify a batch of file patches (e.g. staged git files)
         against AST topology and contract invariants with zero-side-effect isolation.
@@ -194,14 +209,20 @@ class TopoSliceEngine:
         start_time = time.perf_counter()
 
         if not file_patches:
-            return VerificationReport(
+            tax_scores = RiskTaxonomyScores()
+            return EnhancedVerificationReport(
                 status="APPROVED",
                 confidence=1.0,
+                risk_score=0.05,
+                epistemic_uncertainty=0.01,
+                risk_taxonomy=tax_scores,
+                active_risk_categories=[],
                 cycles_detected=[],
                 invariant_violations=[],
                 linearized_subgraph="[BATCH] No files to verify.\n[GATE]\nSTATUS: APPROVED",
                 affected_symbols=[],
                 latency_ms=0.0,
+                is_neural_calibrated=False,
             )
 
         # Stage 1: Diff Boundary Locator for each target file
@@ -240,16 +261,21 @@ class TopoSliceEngine:
         # Immediate exit on syntax error in any file
         if syntax_errors:
             elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-            return VerificationReport(
+            tax_scores = RiskTaxonomyScores(breaking_public_api=0.95, silent_logic_drift=0.90)
+            return EnhancedVerificationReport(
                 status="REJECTED",
                 confidence=1.0,
                 risk_score=1.0,
+                epistemic_uncertainty=0.01,
+                risk_taxonomy=tax_scores,
+                active_risk_categories=tax_scores.active_categories(threshold=taxonomy_threshold),
                 cycles_detected=[],
                 invariant_violations=syntax_errors,
                 linearized_subgraph="[BATCH_DIFF] SYNTAX_ERROR\n[GATE]\nSTATUS: REJECTED\nVIOLATIONS:\n"
                 + "\n".join(f"  - {err}" for err in syntax_errors),
                 affected_symbols=[],
                 latency_ms=elapsed_ms,
+                is_neural_calibrated=False,
             )
 
         # Stage 2: Workspace Indexer scan
@@ -354,23 +380,30 @@ class TopoSliceEngine:
             if all_violations:
                 dsl += "\nVIOLATIONS:\n" + "\n".join(f"  - {v}" for v in all_violations)
 
-            # Stage 6: Decision Head / Risk Calibration
-            final_status, final_conf, final_risk = self.decision_head.predict(
+            # Stage 6: Decision Head / Risk Calibration & Multi-Task Taxonomy
+            decision_res = self.decision_head.predict_multi_task(
                 linearized_dsl=dsl,
                 symbolic_status=status,
                 symbolic_confidence=confidence,
                 has_violations=bool(all_violations or all_cycles),
+                violations=all_violations,
+                cycles=all_cycles,
+                taxonomy_threshold=taxonomy_threshold,
             )
 
-            return VerificationReport(
-                status=final_status,
-                confidence=final_conf,
-                risk_score=final_risk,
+            return EnhancedVerificationReport(
+                status=decision_res.status,
+                confidence=decision_res.confidence,
+                risk_score=decision_res.risk_score,
+                epistemic_uncertainty=decision_res.epistemic_uncertainty,
+                risk_taxonomy=decision_res.risk_taxonomy,
+                active_risk_categories=decision_res.active_risk_categories,
                 cycles_detected=all_cycles,
                 invariant_violations=all_violations,
                 linearized_subgraph=dsl,
                 affected_symbols=list(dict.fromkeys(all_affected_symbols)),
                 latency_ms=elapsed_ms,
+                is_neural_calibrated=decision_res.is_neural_calibrated,
             )
         finally:
             # Restore indexer to default disk state (Rollback Resilience)

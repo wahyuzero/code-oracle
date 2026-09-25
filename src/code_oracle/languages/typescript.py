@@ -8,7 +8,7 @@ from tree_sitter import Language, Node, Parser
 import tree_sitter_javascript
 import tree_sitter_typescript
 
-from code_oracle.languages.common import format_syntax_error, get_node_text
+from code_oracle.languages.common import extract_preceding_docstring, format_syntax_error, get_node_text
 from code_oracle.models import CallReference, ImportReference, Parameter, Symbol
 
 _TS_LANG = Language(tree_sitter_typescript.language_typescript())
@@ -335,7 +335,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
     def process_node(node: Node, parent_qualname: Optional[str] = None):
         # Unwrap export and ambient statements
         target_node = node
+        is_exported = False
         if node.type in ("export_statement", "export_default_statement"):
+            is_exported = True
             for ch in node.children:
                 if ch.type in (
                     "function_declaration",
@@ -371,6 +373,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                 if ch.type in ("internal_module", "module"):
                     target_node = ch
                     break
+
+        docstring = extract_preceding_docstring(node, source_bytes)
+        visibility = "public" if is_exported else "internal"
 
         if target_node.type == "function_declaration":
             name_node = target_node.child_by_field_name("name")
@@ -416,6 +421,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                 calls=calls,
                 is_method=False,
                 is_static=False,
+                docstring=docstring,
+                is_exported=is_exported,
+                visibility=visibility,
             )
             symbols.append(symbol)
 
@@ -468,6 +476,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                             calls=calls,
                             is_method=False,
                             is_static=False,
+                            docstring=docstring,
+                            is_exported=is_exported,
+                            visibility=visibility,
                         )
                         symbols.append(symbol)
                     elif name_node:
@@ -488,6 +499,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                                     signature=f"{sig_prefix} {var_name}",
                                     min_args=0,
                                     max_args=0,
+                                    docstring=docstring,
+                                    is_exported=is_exported,
+                                    visibility=visibility,
                                 )
                             )
 
@@ -530,6 +544,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                 signature=signature,
                 calls=class_calls,
                 bases=bases,
+                docstring=docstring,
+                is_exported=is_exported,
+                visibility=visibility,
             )
             symbols.append(class_sym)
 
@@ -572,6 +589,19 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                         ret_suffix = f": {ret_type}" if ret_type else ""
                         m_sig = f"{m_prefix}{m_name}({', '.join(param_strs)}){ret_suffix}"
 
+                        m_doc = extract_preceding_docstring(member, source_bytes)
+                        m_is_priv = any(ch.type == "accessibility_modifier" and get_node_text(ch, source_bytes) == "private" for ch in member.children) or m_name.startswith("#")
+                        m_is_prot = any(ch.type == "accessibility_modifier" and get_node_text(ch, source_bytes) == "protected" for ch in member.children)
+                        if m_is_priv:
+                            m_vis = "private"
+                            m_exp = False
+                        elif m_is_prot:
+                            m_vis = "internal"
+                            m_exp = False
+                        else:
+                            m_vis = "public" if is_exported else "internal"
+                            m_exp = is_exported
+
                         method_sym = Symbol(
                             name=m_name,
                             qualname=m_qualname,
@@ -587,6 +617,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                             calls=calls,
                             is_method=is_method,
                             is_static=is_static,
+                            docstring=m_doc,
+                            is_exported=m_exp,
+                            visibility=m_vis,
                         )
                         symbols.append(method_sym)
 
@@ -604,6 +637,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                         lineno=target_node.start_point.row + 1,
                         end_lineno=target_node.end_point.row + 1,
                         signature=f"interface {if_name}",
+                        docstring=docstring,
+                        is_exported=is_exported,
+                        visibility=visibility,
                     )
                 )
 
@@ -621,6 +657,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                         lineno=target_node.start_point.row + 1,
                         end_lineno=target_node.end_point.row + 1,
                         signature=f"type {t_name}",
+                        docstring=docstring,
+                        is_exported=is_exported,
+                        visibility=visibility,
                     )
                 )
 
@@ -640,6 +679,9 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
                         signature=f"enum {enum_name}",
                         min_args=0,
                         max_args=0,
+                        docstring=docstring,
+                        is_exported=is_exported,
+                        visibility=visibility,
                     )
                 )
 
@@ -674,6 +716,8 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
             end_lineno=line_count,
             signature=f"// module {file_path}",
             calls=module_calls,
+            is_exported=True,
+            visibility="public",
         )
         symbols.append(module_sym)
 
