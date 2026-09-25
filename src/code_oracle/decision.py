@@ -7,6 +7,7 @@ Evaluates linearized Micro-DSL subgraphs using fine-tuned Laya weights
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -42,6 +43,8 @@ class LayaDecisionHead:
     Provides sub-50ms local verification with calibrated risk scores.
     """
 
+    DEFAULT_HF_REPO: str = "wxsys/code-oracle-laya-421m"
+
     def __init__(self, weights_path: Optional[Path] = None, enabled: bool = False):
         self.enabled = enabled
         self.weights_path = self._resolve_weights_path(weights_path) if enabled else None
@@ -54,9 +57,15 @@ class LayaDecisionHead:
         if explicit_path:
             return Path(explicit_path).resolve()
 
-        # Candidate paths
+        # Check explicit environment variable
+        env_weights = os.environ.get("CODE_ORACLE_WEIGHTS")
+        if env_weights and Path(env_weights).exists():
+            return Path(env_weights).resolve()
+
+        # Candidate local paths
         candidates = [
             Path.cwd() / ".code_oracle" / "weights",
+            Path.home() / ".cache" / "code_oracle" / "weights",
             Path(__file__).resolve().parent / "weights",
             Path.cwd() / "weights",
             Path("/content/code_oracle_laya_model"),
@@ -64,6 +73,27 @@ class LayaDecisionHead:
         for c in candidates:
             if c.exists() and (c / "model.safetensors").exists():
                 return c.resolve()
+
+        # Attempt downloading from Hugging Face Hub if auto-download enabled
+        auto_download = os.environ.get("CODE_ORACLE_AUTO_DOWNLOAD", "1").lower() in ("1", "true", "yes")
+        if auto_download:
+            try:
+                from huggingface_hub import snapshot_download
+
+                cache_dir = Path.home() / ".cache" / "code_oracle" / "weights"
+                repo_id = os.environ.get("CODE_ORACLE_HF_REPO", self.DEFAULT_HF_REPO)
+                hf_token = os.environ.get("HF_TOKEN")
+                downloaded = snapshot_download(
+                    repo_id=repo_id,
+                    local_dir=str(cache_dir),
+                    token=hf_token,
+                )
+                p = Path(downloaded)
+                if p.exists() and (p / "model.safetensors").exists():
+                    return p.resolve()
+            except Exception as exc:
+                logger.debug("Failed to auto-download weights from Hugging Face: %s", exc)
+
         return None
 
     @staticmethod
