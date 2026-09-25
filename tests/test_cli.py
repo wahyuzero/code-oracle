@@ -213,3 +213,29 @@ def test_cli_perf_lint_command(cli_workspace):
     assert "latency_ms" in data
     assert data["total_diagnostics_count"] == 0
 
+
+def test_cli_perf_lint_formats_and_error_exit(cli_workspace):
+    bad_file = cli_workspace / "leak.py"
+    bad_file.write_text("f = open('leak.txt')\n", encoding="utf-8")
+
+    # Table format
+    res_table = subprocess.run(
+        ["code-oracle", "perf-lint", "-w", str(cli_workspace), "--format", "table"],
+        capture_output=True,
+        text=True,
+    )
+    assert res_table.returncode == 1  # exits 1 on errors by default
+    assert "Rule" in res_table.stdout
+    assert "PERF003" in res_table.stdout
+
+    # Text format
+    res_text = subprocess.run(
+        ["code-oracle", "perf-lint", "-w", str(cli_workspace), "--format", "text"],
+        capture_output=True,
+        text=True,
+    )
+    assert res_text.returncode == 1
+    assert "PERF003" in res_text.stdout
+    assert "leak.py:1" in res_text.stdout
+
+

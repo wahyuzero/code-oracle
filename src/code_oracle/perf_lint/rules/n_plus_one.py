@@ -28,6 +28,9 @@ DB_IO_METHODS: Set[str] = {
     "fetchmany",
     "raw_query",
     "queryrow",
+    "post",
+    "upsert",
+    "save",
 }
 
 HTTP_IO_PREFIXES: Tuple[str, ...] = (
@@ -45,6 +48,15 @@ HTTP_IO_PREFIXES: Tuple[str, ...] = (
     "urllib.request.",
     "aiohttp.",
     "httpx.",
+    "api.",
+    "session.",
+    "httpclient.",
+    "http_client.",
+    "service.",
+    "c.get",
+    "c.post",
+    "hc.get",
+    "hc.post",
 )
 
 DIRECT_IO_FUNCS: Set[str] = {
@@ -52,6 +64,7 @@ DIRECT_IO_FUNCS: Set[str] = {
     "query",
     "execute",
     "select",
+    "urlopen",
 }
 
 
@@ -87,6 +100,53 @@ class NPlusOneRule:
         for prefix in HTTP_IO_PREFIXES:
             if clean_lower.startswith(prefix) or f".{prefix}" in clean_lower:
                 return True
+
+        # Check for database write calls (update/insert/delete) with DB-related receiver
+        # to prevent false positives on set.update(), dict.update(), list.insert()
+        if method in ("update", "insert", "delete"):
+            parts = re.split(r"\.|::", clean_lower)
+            if len(parts) >= 2:
+                receiver = parts[-2]
+                if any(
+                    kw in receiver
+                    for kw in (
+                        "db",
+                        "database",
+                        "repo",
+                        "table",
+                        "model",
+                        "conn",
+                        "cursor",
+                        "collection",
+                        "dao",
+                        "entity",
+                        "sql",
+                    )
+                ):
+                    return True
+
+        # Check for network/database .get(...) calls while preventing dict.get() false positives
+        if method == "get":
+            parts = re.split(r"\.|::", clean_lower)
+            if len(parts) >= 2:
+                receiver = parts[-2]
+                if any(
+                    kw in receiver
+                    for kw in (
+                        "http",
+                        "client",
+                        "request",
+                        "api",
+                        "session",
+                        "service",
+                        "db",
+                        "fetch",
+                        "conn",
+                        "rest",
+                        "remote",
+                    )
+                ):
+                    return True
 
         return False
 

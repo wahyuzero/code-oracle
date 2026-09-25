@@ -9,8 +9,22 @@ from tree_sitter import Node
 
 from code_oracle.perf_lint.models import PerfDiagnostic, PerfRule, Severity
 
+COMPREHENSION_NODE_TYPES: Set[str] = {
+    "list_comprehension",
+    "dictionary_comprehension",
+    "set_comprehension",
+    "generator_expression",
+}
+
 LOOP_NODE_TYPES: Dict[str, Set[str]] = {
-    "python": {"for_statement", "while_statement"},
+    "python": {
+        "for_statement",
+        "while_statement",
+        "list_comprehension",
+        "dictionary_comprehension",
+        "set_comprehension",
+        "generator_expression",
+    },
     "typescript": {
         "for_statement",
         "for_in_statement",
@@ -59,6 +73,14 @@ class NestedLoopsRule:
     def is_loop_node(node: Node, language: str) -> bool:
         """Check if AST node is a loop in target language."""
         return node.type in LOOP_NODE_TYPES.get(language, set())
+
+    @staticmethod
+    def get_loop_clauses(node: Node, language: str) -> List[Node]:
+        """Return loop clauses for compound loops like Python comprehensions."""
+        if language == "python" and node.type in COMPREHENSION_NODE_TYPES:
+            clauses = [c for c in node.children if c.type == "for_in_clause"]
+            return clauses if clauses else [node]
+        return [node]
 
     @staticmethod
     def is_function_boundary(node: Node, language: str) -> bool:

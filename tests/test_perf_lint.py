@@ -819,3 +819,193 @@ for i in range(5):
         severity="warn",
     )
     assert res_warn["total_diagnostics_count"] == 1
+
+
+# ============================================================================
+# Deep Edge-Case Tests (Comprehensions, Precise Scoping, Node Sync, N+1 Post)
+# ============================================================================
+
+def test_perf001_comprehension_nested_loop_depths():
+    """Verify nested loop complexity detection inside Python list/dict/set comprehensions."""
+    code = """
+flat = [x for row in matrix for x in row]  # depth 2
+cubic = [x for i in I for j in J for k in K]  # depth 2 and depth 3
+nested = [[x for x in row] for row in matrix]  # depth 2
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF001.value]
+    assert len(diags) == 4
+    # flat has depth 2
+    assert any("depth 2" in d.message and d.severity == Severity.WARN for d in diags)
+    # cubic has depth 3
+    assert any("depth 3" in d.message and d.severity == Severity.ERROR for d in diags)
+
+
+def test_perf002_comprehension_n_plus_one_detection():
+    """Verify N+1 database queries and HTTP requests inside comprehensions."""
+    code = """
+users = [db.query(uid) for uid in user_ids]
+responses = [requests.get(url) for url in urls]
+safe_dict = [item.get("key") for item in items]
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF002.value]
+    assert len(diags) == 2
+    assert any("db.query" in d.message for d in diags)
+    assert any("requests.get" in d.message for d in diags)
+    # item.get("key") MUST NOT be flagged as N+1
+    assert not any("item.get" in d.message for d in diags)
+
+
+def test_perf002_post_and_network_receiver_methods():
+    """Verify .post and network client .get inside loops while avoiding dict/set false positives."""
+    code_py = """
+for item in items:
+    api.post("/items", item)
+    session.get(f"/items/{item.id}")
+    db.update(item)
+    # in-memory operations: safe
+    target_files.update(item)
+    val = record.get("id")
+"""
+    v_py = PerfLintVisitor(code_py, "test.py", "python")
+    diags_py = [d for d in v_py.run() if d.rule_id == PerfRule.PERF002.value]
+    assert len(diags_py) == 3
+    assert any("api.post" in d.message for d in diags_py)
+    assert any("session.get" in d.message for d in diags_py)
+    assert any("db.update" in d.message for d in diags_py)
+    assert not any("target_files.update" in d.message for d in diags_py)
+    assert not any("record.get" in d.message for d in diags_py)
+
+    code_ts = """
+for (const item of items) {
+    await api.post('/items', item);
+    await httpClient.get('/items/' + item.id);
+}
+"""
+    v_ts = PerfLintVisitor(code_ts, "test.ts", "typescript")
+    diags_ts = [d for d in v_ts.run() if d.rule_id == PerfRule.PERF002.value]
+    assert len(diags_ts) == 2
+
+
+def test_perf003_python_strongconnect_and_bare_identifiers_not_leaks():
+    """Verify strongconnect, reconnect, and disconnect are not falsely flagged as unclosed DB connections."""
+    code = """
+def tarjan():
+    strongconnect(neighbor)
+    reconnect()
+    disconnect()
+    # actual leak:
+    conn = sqlite3.connect("db.sqlite")
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags) == 1
+    assert "sqlite3.connect" in diags[0].message
+    assert not any("strongconnect" in d.message for d in diags)
+    assert not any("reconnect" in d.message for d in diags)
+    assert not any("disconnect" in d.message for d in diags)
+
+
+def test_perf003_typescript_sibling_try_finally_and_pipe_scoped():
+    """Verify TS streams followed by try/finally or chained with pipe are recognized as safely scoped."""
+    code = """
+function processFile() {
+    const s1 = fs.createReadStream("a.txt");
+    try {
+        work(s1);
+    } finally {
+        s1.close();
+    }
+
+    // chained pipe
+    fs.createReadStream("b.txt").pipe(dest);
+
+    // variable pipe
+    const s3 = fs.createReadStream("c.txt");
+    s3.pipe(dest);
+
+    // actual unclosed leak
+    const s4 = fs.createReadStream("leak.txt");
+}
+"""
+    v = PerfLintVisitor(code, "test.ts", "typescript")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags) == 1
+    assert diags[0].lineno == 18  # s4 leak line
+
+
+def test_perf003_go_multi_variable_defer_tracking():
+    """Verify Go resource tracking accurately catches unclosed descriptor when another variable has defer."""
+    code = """
+package main
+import "os"
+
+func handler() {
+    f1, _ := os.Open("safe.txt")
+    defer f1.Close()
+
+    f2, _ := os.Open("leak.txt") // f2 is not closed!
+}
+"""
+    v = PerfLintVisitor(code, "main.go", "go")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags) == 1
+    assert diags[0].lineno == 9
+
+
+def test_perf003_rust_raw_pointer_leaks():
+    """Verify Rust Box::into_raw and CString::into_raw are flagged under PERF003."""
+    code = """
+fn leak_ptrs() {
+    let raw = Box::into_raw(b);
+    let raw_str = CString::into_raw(s);
+}
+"""
+    v = PerfLintVisitor(code, "main.rs", "rust")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags) == 2
+
+
+def test_perf004_async_blocking_expanded():
+    """Verify bare sleep in Python and all *Sync methods in TypeScript."""
+    code_py = """
+from time import sleep
+async def worker():
+    sleep(1)
+    os.popen("ls")
+"""
+    v_py = PerfLintVisitor(code_py, "test.py", "python")
+    diags_py = [d for d in v_py.run() if d.rule_id == PerfRule.PERF004.value]
+    assert len(diags_py) == 2
+
+    code_ts = """
+import { writeFileSync, existsSync } from 'fs';
+import { spawnSync } from 'child_process';
+
+async function syncWorker() {
+    writeFileSync('a.txt', 'data');
+    existsSync('a.txt');
+    spawnSync('ls');
+}
+"""
+    v_ts = PerfLintVisitor(code_ts, "test.ts", "typescript")
+    diags_ts = [d for d in v_ts.run() if d.rule_id == PerfRule.PERF004.value]
+    assert len(diags_ts) == 3
+
+
+def test_suppression_comma_separated_and_intermediate_loops():
+    """Verify comma-separated rules in suppression tag and intermediate loop suppression."""
+    code = """
+def test_nested():
+    for i in range(10):
+        # code-oracle: ignore-perf[PERF001, PERF002]
+        for j in range(10):
+            for k in range(10):
+                db.query(k)
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = v.run()
+    # The middle loop suppresses PERF001 for loop k and PERF002 for db.query(k)
+    assert len(diags) == 0
+

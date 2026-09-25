@@ -70,6 +70,8 @@ class PerfDiagnostic:
     suppressed: bool = False
 
     def __post_init__(self) -> None:
+        if hasattr(self.rule_id, "value"):
+            self.rule_id = self.rule_id.value
         if isinstance(self.severity, str):
             self.severity = Severity.from_str(self.severity)
         if not self.rule_name and self.rule_id in RULE_METADATA:

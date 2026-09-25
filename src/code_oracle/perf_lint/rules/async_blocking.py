@@ -36,9 +36,9 @@ class AsyncBlockingRule:
         clean_lower = clean.lower()
 
         if language == "python":
-            if clean in ("time.sleep", "open", "urllib.request.urlopen", "os.system"):
+            if clean in ("time.sleep", "sleep", "open", "urllib.request.urlopen", "os.system", "os.popen"):
                 return True
-            if clean.startswith(("requests.", "subprocess.", "urllib.")):
+            if clean.startswith(("requests.", "subprocess.", "urllib.", "urllib3.", "httpx.")):
                 return True
             return False
 
@@ -46,7 +46,8 @@ class AsyncBlockingRule:
             if "sync" in clean_lower and (
                 clean_lower.startswith("fs.")
                 or clean_lower.startswith("child_process.")
-                or clean_lower in ("execsync", "readfilesync")
+                or clean_lower.startswith("crypto.")
+                or clean_lower.endswith("sync")
             ):
                 return True
             if clean in ("Atomics.wait", "crypto.pbkdf2Sync", "crypto.randomBytesSync"):

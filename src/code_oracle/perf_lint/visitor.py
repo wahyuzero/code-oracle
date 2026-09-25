@@ -48,12 +48,13 @@ from code_oracle.perf_lint.rules.unclosed_res import (
 
 # Language parsers cache
 _PY_LANG = Language(tree_sitter_python.language())
+_PY_PARSER = Parser(_PY_LANG)
 
 
 def get_parser(language: str, file_path: str = "") -> Optional[Parser]:
     """Retrieve Tree-sitter parser for target language."""
     if language == "python":
-        return Parser(_PY_LANG)
+        return _PY_PARSER
     elif language in ("typescript", "javascript"):
         return get_ts_parser(file_path)
     elif language == "go":
@@ -82,7 +83,7 @@ CALL_NODE_TYPES: Dict[str, Set[str]] = {
 
 # Inline suppression pattern
 SUPPRESS_PATTERN = re.compile(
-    r"(?:#|//|/\*)\s*code-oracle:\s*ignore-perf(?:\s*[\(\[]([A-Za-z0-9_-]+)[\)\]])?",
+    r"(?:#|//|/\*)\s*code-oracle:\s*ignore-perf(?:\s*[\(\[]([A-Za-z0-9_,\s-]+)[\)\]])?",
     re.IGNORECASE,
 )
 
@@ -141,8 +142,11 @@ def _is_suppressed(
         if 1 <= l_num <= len(lines):
             line_text = lines[l_num - 1]
             for match in SUPPRESS_PATTERN.finditer(line_text):
-                specified_rule = match.group(1)
-                if not specified_rule or specified_rule.upper() == rule_id.upper():
+                specified = match.group(1)
+                if not specified:
+                    return True
+                rules = [r.strip().upper() for r in specified.split(",")]
+                if rule_id.upper() in rules:
                     return True
 
     return False
@@ -206,23 +210,25 @@ class PerfLintVisitor:
             self.loop_stack = []
 
         # Handle loop entrance
+        loop_clauses: List[Node] = []
         if is_loop:
-            self.loop_stack.append(node)
-            current_depth = len(self.loop_stack)
+            loop_clauses = NestedLoopsRule.get_loop_clauses(node, lang)
+            for clause in loop_clauses:
+                self.loop_stack.append(clause)
+                current_depth = len(self.loop_stack)
 
-            # PERF001: Nested Loops Complexity
-            diag = NestedLoopsRule.check(
-                node=node,
-                depth=current_depth,
-                max_depth=self.max_depth,
-                file_path=self.file_path,
-                lines=self.lines,
-            )
-            if diag:
-                root_line = self.loop_stack[0].start_point.row + 1
-                enclosing_lines = [root_line] if root_line != diag.lineno else None
-                if not _is_suppressed(self.lines, diag.lineno, PerfRule.PERF001.value, enclosing_lines):
-                    self.diagnostics.append(diag)
+                # PERF001: Nested Loops Complexity
+                diag = NestedLoopsRule.check(
+                    node=clause,
+                    depth=current_depth,
+                    max_depth=self.max_depth,
+                    file_path=self.file_path,
+                    lines=self.lines,
+                )
+                if diag:
+                    enclosing_lines = [n.start_point.row + 1 for n in self.loop_stack]
+                    if not _is_suppressed(self.lines, diag.lineno, PerfRule.PERF001.value, enclosing_lines):
+                        self.diagnostics.append(diag)
 
         # Handle function calls
         if is_call:
@@ -234,7 +240,8 @@ class PerfLintVisitor:
 
         # Cleanup loop exit
         if is_loop:
-            self.loop_stack.pop()
+            for _ in loop_clauses:
+                self.loop_stack.pop()
 
         # Cleanup function exit
         if is_func:

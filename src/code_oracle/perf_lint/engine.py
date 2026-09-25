@@ -16,6 +16,22 @@ from code_oracle.perf_lint.models import PerfDiagnostic, PerfReport, Severity
 from code_oracle.perf_lint.visitor import PerfLintVisitor
 
 
+def _filter_dirs(dirs: List[str]) -> List[str]:
+    return [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
+
+
+def _walk_supported_files(directory: Path) -> Set[Path]:
+    """Discover all supported source code files within target directory."""
+    result: Set[Path] = set()
+    for root, dirs, files in os.walk(directory):  # code-oracle: ignore-perf[PERF001]
+        dirs[:] = _filter_dirs(dirs)
+        for file in files:
+            p = Path(root) / file
+            if p.suffix.lower() in SUPPORTED_EXTENSIONS:
+                result.add(p)
+    return result
+
+
 class PerfLintEngine:
     """
     Sub-50ms Static Performance Anti-Pattern & Resource Leak Engine.
@@ -108,17 +124,9 @@ class PerfLintEngine:
                     if abs_path.suffix.lower() in SUPPORTED_EXTENSIONS:
                         target_files.add(abs_path)
                 elif abs_path.is_dir():
-                    for root, dirs, files in os.walk(abs_path):
-                        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
-                        for file in files:
-                            if Path(file).suffix.lower() in SUPPORTED_EXTENSIONS:
-                                target_files.add(Path(root) / file)
+                    target_files.update(_walk_supported_files(abs_path))
         else:
-            for root, dirs, files in os.walk(self.workspace_root):
-                dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
-                for file in files:
-                    if Path(file).suffix.lower() in SUPPORTED_EXTENSIONS:
-                        target_files.add(Path(root) / file)
+            target_files.update(_walk_supported_files(self.workspace_root))
 
         all_diagnostics: List[PerfDiagnostic] = []
         scanned_count = len(target_files)
