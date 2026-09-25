@@ -23,6 +23,28 @@ from code_oracle.languages.go import get_go_parser
 from code_oracle.languages.rust import get_rust_parser
 from code_oracle.languages.typescript import get_ts_parser
 from code_oracle.perf_lint.models import PerfDiagnostic, PerfRule, Severity
+from code_oracle.perf_lint.rules.async_blocking import (
+    AsyncBlockingRule,
+    check_async_blocking,
+)
+from code_oracle.perf_lint.rules.n_plus_one import (
+    DB_IO_METHODS,
+    DIRECT_IO_FUNCS,
+    HTTP_IO_PREFIXES,
+    NPlusOneRule,
+    check_n_plus_one,
+    extract_method_name,
+)
+from code_oracle.perf_lint.rules.nested_loops import (
+    FUNCTION_NODE_TYPES,
+    LOOP_NODE_TYPES,
+    NestedLoopsRule,
+    check_nested_loop,
+)
+from code_oracle.perf_lint.rules.unclosed_res import (
+    UnclosedResourceRule,
+    check_unclosed_resource,
+)
 
 # Language parsers cache
 _PY_LANG = Language(tree_sitter_python.language())
@@ -41,47 +63,13 @@ def get_parser(language: str, file_path: str = "") -> Optional[Parser]:
     return None
 
 
-# Loop node types per language
-LOOP_NODE_TYPES: Dict[str, Set[str]] = {
-    "python": {"for_statement", "while_statement"},
-    "typescript": {
-        "for_statement",
-        "for_in_statement",
-        "for_of_statement",
-        "while_statement",
-        "do_statement",
-    },
-    "javascript": {
-        "for_statement",
-        "for_in_statement",
-        "for_of_statement",
-        "while_statement",
-        "do_statement",
-    },
-    "go": {"for_statement"},
-    "rust": {"for_expression", "while_expression", "loop_expression"},
-}
-
-# Function/closure node types per language
-FUNCTION_NODE_TYPES: Dict[str, Set[str]] = {
-    "python": {"function_definition"},
-    "typescript": {
-        "function_declaration",
-        "function_expression",
-        "arrow_function",
-        "method_definition",
-        "generator_function_declaration",
-    },
-    "javascript": {
-        "function_declaration",
-        "function_expression",
-        "arrow_function",
-        "method_definition",
-        "generator_function_declaration",
-    },
-    "go": {"function_declaration", "method_declaration", "func_literal"},
-    "rust": {"function_item", "closure_expression"},
-}
+# Backward-compatible helper aliases
+_extract_method_name = extract_method_name
+_is_perf002_io_call = NPlusOneRule.is_io_call
+_is_perf003_open_call = UnclosedResourceRule.is_open_call
+_is_scoped_by_context_manager = UnclosedResourceRule.is_scoped
+_is_perf004_blocking_call = AsyncBlockingRule.is_blocking_call
+_is_async_func_node = AsyncBlockingRule.is_async_func_node
 
 # Call node types per language
 CALL_NODE_TYPES: Dict[str, Set[str]] = {
@@ -90,52 +78,6 @@ CALL_NODE_TYPES: Dict[str, Set[str]] = {
     "javascript": {"call_expression"},
     "go": {"call_expression"},
     "rust": {"call_expression"},
-}
-
-# Database / ORM method names for PERF002 (N+1 query detection)
-DB_IO_METHODS: Set[str] = {
-    "query",
-    "execute",
-    "exec",
-    "find",
-    "find_one",
-    "find_many",
-    "find_first",
-    "find_unique",
-    "find_by",
-    "select",
-    "select_all",
-    "fetch",
-    "fetchall",
-    "fetchone",
-    "fetchmany",
-    "raw_query",
-    "queryrow",
-}
-
-# HTTP and network call prefixes for PERF002
-HTTP_IO_PREFIXES: Tuple[str, ...] = (
-    "requests.",
-    "http.get",
-    "http.post",
-    "http.head",
-    "http.postform",
-    "http.do",
-    "client.get",
-    "client.post",
-    "client.do",
-    "axios.",
-    "reqwest::",
-    "urllib.request.",
-    "aiohttp.",
-    "httpx.",
-)
-
-DIRECT_IO_FUNCS: Set[str] = {
-    "fetch",
-    "query",
-    "execute",
-    "select",
 }
 
 # Inline suppression pattern
@@ -153,204 +95,6 @@ def _extract_callee_text(node: Node, source_bytes: bytes) -> str:
     if node.children:
         return source_bytes[node.children[0].start_byte : node.children[0].end_byte].decode("utf-8", errors="replace").strip()
     return ""
-
-
-def _extract_method_name(callee_text: str) -> str:
-    """Extract the last identifier (method name) from a callee expression."""
-    clean = callee_text.strip().replace("\n", "")
-    parts = re.split(r"\.|::", clean)
-    if not parts:
-        return ""
-    last_part = parts[-1].strip()
-    match = re.search(r"^[a-zA-Z_][a-zA-Z0-9_]*", last_part)
-    return match.group(0).lower() if match else last_part.lower()
-
-
-def _is_perf002_io_call(callee_text: str) -> bool:
-    """Check if callee represents database query or network I/O."""
-    clean = callee_text.strip().replace("\n", "")
-    clean_lower = clean.lower()
-    method = _extract_method_name(clean)
-
-    if method in DB_IO_METHODS:
-        return True
-
-    if clean_lower in DIRECT_IO_FUNCS:
-        return True
-
-    for prefix in HTTP_IO_PREFIXES:
-        if clean_lower.startswith(prefix) or f".{prefix}" in clean_lower:
-            return True
-
-    return False
-
-
-def _is_perf003_open_call(callee_text: str, lang: str) -> bool:
-    """Check if callee is a resource open call that requires scoped cleanup."""
-    clean = callee_text.strip()
-    clean_lower = clean.lower()
-
-    if lang == "python":
-        if clean in ("open", "socket.socket", "socket.create_connection"):
-            return True
-        if clean.endswith((".connect", "connect")) and any(
-            db in clean_lower for db in ("sqlite", "psycopg", "mysql", "asyncpg", "db", "conn")
-        ):
-            return True
-        return False
-
-    elif lang in ("typescript", "javascript"):
-        return clean.startswith((
-            "fs.open",
-            "fs.createReadStream",
-            "fs.createWriteStream",
-            "net.connect",
-            "net.createConnection",
-            "tls.connect",
-        ))
-
-    elif lang == "go":
-        return clean.startswith((
-            "os.Open",
-            "os.OpenFile",
-            "os.Create",
-            "net.Dial",
-            "net.DialTimeout",
-            "net.Listen",
-            "sql.Open",
-            "http.Get",
-            "http.Post",
-            "http.Head",
-        ))
-
-    elif lang == "rust":
-        return clean in (
-            "Box::leak",
-            "std::mem::forget",
-            "mem::forget",
-            "std::mem::ManuallyDrop::new",
-            "ManuallyDrop::new",
-        )
-
-    return False
-
-
-def _is_scoped_by_context_manager(
-    call_node: Node,
-    callee_text: str,
-    lang: str,
-    source_bytes: bytes,
-) -> bool:
-    """
-    Check if resource open call is properly scoped:
-    - Python: within `with_clause` or `with_item` in `with_statement`
-    - TypeScript/JS: within `try_statement` containing `finally_clause`
-    - Go: within function containing `defer ...Close()`
-    - Rust: Box::leak / mem::forget are always leaks
-    """
-    if lang == "python":
-        curr = call_node.parent
-        while curr is not None:
-            if curr.type in ("with_clause", "with_item"):
-                return True
-            if curr.type == "function_definition":
-                break
-            curr = curr.parent
-        return False
-
-    elif lang in ("typescript", "javascript"):
-        curr = call_node.parent
-        while curr is not None:
-            if curr.type == "try_statement":
-                # Check if try_statement has finally_clause
-                if any(c.type == "finally_clause" for c in curr.children):
-                    return True
-            if curr.type in ("function_declaration", "arrow_function", "method_definition"):
-                break
-            curr = curr.parent
-        return False
-
-    elif lang == "go":
-        # Find enclosing function node
-        curr = call_node.parent
-        enclosing_func: Optional[Node] = None
-        while curr is not None:
-            if curr.type in ("function_declaration", "method_declaration", "func_literal"):
-                enclosing_func = curr
-                break
-            curr = curr.parent
-
-        if enclosing_func is None:
-            return False
-
-        # Scan for defer statement calling Close
-        def has_defer_close(n: Node) -> bool:
-            if n.type == "defer_statement":
-                txt = source_bytes[n.start_byte : n.end_byte].decode("utf-8", errors="ignore")
-                if "Close" in txt:
-                    return True
-            for ch in n.children:
-                # Do not cross inner function boundaries
-                if ch.type in ("function_declaration", "method_declaration"):
-                    continue
-                if has_defer_close(ch):
-                    return True
-            return False
-
-        return has_defer_close(enclosing_func)
-
-    elif lang == "rust":
-        # Rust explicit leaks are never scoped
-        return False
-
-    return True
-
-
-def _is_perf004_blocking_call(callee_text: str, lang: str) -> bool:
-    """Check if callee is a blocking synchronous call inside async context."""
-    clean = callee_text.strip()
-    clean_lower = clean.lower()
-
-    if lang == "python":
-        if clean in ("time.sleep", "open", "urllib.request.urlopen", "os.system"):
-            return True
-        if clean.startswith(("requests.", "subprocess.", "urllib.")):
-            return True
-        return False
-
-    elif lang in ("typescript", "javascript"):
-        if "sync" in clean_lower and (
-            clean_lower.startswith("fs.")
-            or clean_lower.startswith("child_process.")
-            or clean_lower in ("execsync", "readfilesync")
-        ):
-            return True
-        if clean in ("Atomics.wait", "crypto.pbkdf2Sync", "crypto.randomBytesSync"):
-            return True
-        return False
-
-    elif lang == "rust":
-        if clean in ("std::thread::sleep", "thread::sleep"):
-            return True
-        if clean.startswith(("std::fs::", "fs::")):
-            return True
-        return False
-
-    return False
-
-
-def _is_async_func_node(node: Node, lang: str) -> bool:
-    """Determine if a function node is asynchronous."""
-    if lang == "python":
-        return any(c.type == "async" for c in node.children)
-    elif lang in ("typescript", "javascript"):
-        return any(c.type == "async" for c in node.children)
-    elif lang == "rust":
-        for c in node.children:
-            if c.type == "function_modifiers":
-                return any(mc.type == "async" for mc in c.children)
-        return False
-    return False
 
 
 def _get_func_name(node: Node, source_bytes: bytes, lang: str) -> str:
@@ -404,7 +148,6 @@ def _is_suppressed(
     return False
 
 
-
 class PerfLintVisitor:
     """
     Single-pass multi-language Tree-sitter AST visitor for performance anti-patterns.
@@ -448,18 +191,14 @@ class PerfLintVisitor:
     def _visit(self, node: Node) -> None:
         """Recursive AST node visitor."""
         lang = self.language
-        loop_types = LOOP_NODE_TYPES.get(lang, set())
-        func_types = FUNCTION_NODE_TYPES.get(lang, set())
-        call_types = CALL_NODE_TYPES.get(lang, set())
-
-        is_loop = node.type in loop_types
-        is_func = node.type in func_types
-        is_call = node.type in call_types
+        is_loop = NestedLoopsRule.is_loop_node(node, lang)
+        is_func = NestedLoopsRule.is_function_boundary(node, lang)
+        is_call = node.type in CALL_NODE_TYPES.get(lang, set())
 
         # Handle function scope boundaries
         outer_loops: Optional[List[Node]] = None
         if is_func:
-            is_async = _is_async_func_node(node, lang)
+            is_async = AsyncBlockingRule.is_async_func_node(node, lang)
             func_name = _get_func_name(node, self.source_bytes, lang)
             self.func_stack.append((func_name, is_async, node))
             # Reset loop depth per function scope
@@ -472,35 +211,18 @@ class PerfLintVisitor:
             current_depth = len(self.loop_stack)
 
             # PERF001: Nested Loops Complexity
-            if current_depth >= 2 and current_depth >= self.max_depth:
-                lineno = node.start_point.row + 1
-                end_lineno = node.end_point.row + 1
-                col = node.start_point.column
-                end_col = node.end_point.column
-
-                # Check root loop for whole-nest suppression
+            diag = NestedLoopsRule.check(
+                node=node,
+                depth=current_depth,
+                max_depth=self.max_depth,
+                file_path=self.file_path,
+                lines=self.lines,
+            )
+            if diag:
                 root_line = self.loop_stack[0].start_point.row + 1
-                enclosing_lines = [root_line] if root_line != lineno else None
-
-                if not _is_suppressed(self.lines, lineno, PerfRule.PERF001.value, enclosing_lines):
-                    severity = Severity.WARN if current_depth == 2 else Severity.ERROR
-                    complexity = f"O(N^{current_depth})"
-                    msg = f"Nested loop complexity {complexity} detected at depth {current_depth}"
-                    ctx = self.lines[lineno - 1].strip() if 1 <= lineno <= len(self.lines) else None
-
-                    self.diagnostics.append(
-                        PerfDiagnostic(
-                            rule_id=PerfRule.PERF001.value,
-                            message=msg,
-                            severity=severity,
-                            file_path=self.file_path,
-                            lineno=lineno,
-                            end_lineno=end_lineno,
-                            col_offset=col,
-                            end_col_offset=end_col,
-                            context_line=ctx,
-                        )
-                    )
+                enclosing_lines = [root_line] if root_line != diag.lineno else None
+                if not _is_suppressed(self.lines, diag.lineno, PerfRule.PERF001.value, enclosing_lines):
+                    self.diagnostics.append(diag)
 
         # Handle function calls
         if is_call:
@@ -526,85 +248,45 @@ class PerfLintVisitor:
         if not callee_text:
             return
 
-        lineno = call_node.start_point.row + 1
-        end_lineno = call_node.end_point.row + 1
-        col = call_node.start_point.column
-        end_col = call_node.end_point.column
-        ctx = self.lines[lineno - 1].strip() if 1 <= lineno <= len(self.lines) else None
-
         # --- PERF002: N+1 I/O in Loop Bodies ---
-        if len(self.loop_stack) > 0 and _is_perf002_io_call(callee_text):
-            enclosing_loop_lines = [n.start_point.row + 1 for n in self.loop_stack]
-            if not _is_suppressed(self.lines, lineno, PerfRule.PERF002.value, enclosing_loop_lines):
-                msg = f"Possible N+1 query: I/O or database call '{callee_text}' detected inside loop"
-                self.diagnostics.append(
-                    PerfDiagnostic(
-                        rule_id=PerfRule.PERF002.value,
-                        message=msg,
-                        severity=Severity.WARN,
-                        file_path=self.file_path,
-                        lineno=lineno,
-                        end_lineno=end_lineno,
-                        col_offset=col,
-                        end_col_offset=end_col,
-                        context_line=ctx,
-                    )
-                )
+        if len(self.loop_stack) > 0:
+            diag = NPlusOneRule.check(
+                call_node=call_node,
+                callee_text=callee_text,
+                in_loop=True,
+                file_path=self.file_path,
+                lines=self.lines,
+            )
+            if diag:
+                enclosing_loop_lines = [n.start_point.row + 1 for n in self.loop_stack]
+                if not _is_suppressed(self.lines, diag.lineno, PerfRule.PERF002.value, enclosing_loop_lines):
+                    self.diagnostics.append(diag)
 
         # --- PERF003: Resource Leak / Unclosed Descriptors ---
-        if _is_perf003_open_call(callee_text, self.language):
-            is_scoped = _is_scoped_by_context_manager(
-                call_node, callee_text, self.language, self.source_bytes
-            )
-            if not is_scoped:
-                if not _is_suppressed(self.lines, lineno, PerfRule.PERF003.value):
-                    scope_mechanism = (
-                        "'with' context manager"
-                        if self.language == "python"
-                        else (
-                            "'defer ...Close()'"
-                            if self.language == "go"
-                            else "'try/finally'"
-                        )
-                    )
-                    if self.language == "rust":
-                        msg = f"Potential resource or memory leak via '{callee_text}'"
-                    else:
-                        msg = f"Resource '{callee_text}' opened without scoped {scope_mechanism}"
-
-                    self.diagnostics.append(
-                        PerfDiagnostic(
-                            rule_id=PerfRule.PERF003.value,
-                            message=msg,
-                            severity=Severity.ERROR,
-                            file_path=self.file_path,
-                            lineno=lineno,
-                            end_lineno=end_lineno,
-                            col_offset=col,
-                            end_col_offset=end_col,
-                            context_line=ctx,
-                        )
-                    )
+        diag = UnclosedResourceRule.check(
+            call_node=call_node,
+            callee_text=callee_text,
+            language=self.language,
+            source_bytes=self.source_bytes,
+            file_path=self.file_path,
+            lines=self.lines,
+        )
+        if diag:
+            if not _is_suppressed(self.lines, diag.lineno, PerfRule.PERF003.value):
+                self.diagnostics.append(diag)
 
         # --- PERF004: Blocking Synchronous Calls in Async Context ---
         if self.func_stack:
             current_func_name, is_async, _ = self.func_stack[-1]
-            if is_async and _is_perf004_blocking_call(callee_text, self.language):
-                if not _is_suppressed(self.lines, lineno, PerfRule.PERF004.value):
-                    msg = (
-                        f"Blocking synchronous call '{callee_text}' inside async "
-                        f"function '{current_func_name}'"
-                    )
-                    self.diagnostics.append(
-                        PerfDiagnostic(
-                            rule_id=PerfRule.PERF004.value,
-                            message=msg,
-                            severity=Severity.ERROR,
-                            file_path=self.file_path,
-                            lineno=lineno,
-                            end_lineno=end_lineno,
-                            col_offset=col,
-                            end_col_offset=end_col,
-                            context_line=ctx,
-                        )
-                    )
+            diag = AsyncBlockingRule.check(
+                call_node=call_node,
+                callee_text=callee_text,
+                is_async_context=is_async,
+                current_func_name=current_func_name,
+                language=self.language,
+                file_path=self.file_path,
+                lines=self.lines,
+            )
+            if diag:
+                if not _is_suppressed(self.lines, diag.lineno, PerfRule.PERF004.value):
+                    self.diagnostics.append(diag)

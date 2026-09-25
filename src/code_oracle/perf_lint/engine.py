@@ -216,3 +216,11 @@ def lint_performance_patterns(
         scanned_files_count=1,
         latency_ms=elapsed_ms,
     )
+
+
+__all__ = [
+    "PerfLintEngine",
+    "PerfLintVisitor",
+    "lint_performance",
+    "lint_performance_patterns",
+]

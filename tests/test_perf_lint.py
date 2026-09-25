@@ -655,3 +655,167 @@ def test_fastmcp_server_lint_patterns_with_patch(tmp_path):
     assert res["total_diagnostics_count"] == 1
     assert res["diagnostics"][0]["rule_id"] == "PERF001"
     assert res["diagnostics"][0]["severity"] == "warn"
+
+
+def test_rules_direct_module_imports():
+    """Verify direct imports and instantiation from code_oracle.perf_lint.rules."""
+    from code_oracle.perf_lint.rules import (
+        AsyncBlockingRule,
+        NPlusOneRule,
+        NestedLoopsRule,
+        UnclosedResourceRule,
+        check_async_blocking,
+        check_n_plus_one,
+        check_nested_loop,
+        check_unclosed_resource,
+    )
+
+    assert NestedLoopsRule.RULE_ID == "PERF001"
+    assert NPlusOneRule.RULE_ID == "PERF002"
+    assert UnclosedResourceRule.RULE_ID == "PERF003"
+    assert AsyncBlockingRule.RULE_ID == "PERF004"
+
+    # Test NPlusOne helper detection
+    assert NPlusOneRule.is_io_call("db.query")
+    assert NPlusOneRule.is_io_call("requests.get")
+    assert not NPlusOneRule.is_io_call("math.sqrt")
+
+    # Test UnclosedResource helper detection
+    assert UnclosedResourceRule.is_open_call("open", "python")
+    assert UnclosedResourceRule.is_open_call("os.Open", "go")
+    assert UnclosedResourceRule.is_open_call("fs.openSync", "typescript")
+    assert UnclosedResourceRule.is_open_call("Box::leak", "rust")
+    assert not UnclosedResourceRule.is_open_call("print", "python")
+
+    # Test AsyncBlocking helper detection
+    assert AsyncBlockingRule.is_blocking_call("time.sleep", "python")
+    assert AsyncBlockingRule.is_blocking_call("fs.readFileSync", "typescript")
+    assert AsyncBlockingRule.is_blocking_call("std::thread::sleep", "rust")
+    assert not AsyncBlockingRule.is_blocking_call("asyncio.sleep", "python")
+
+
+def test_perf001_closure_resets_loop_depth():
+    """Verify that inner function closures reset loop depth calculation."""
+    code = """
+def outer():
+    for i in range(10):  # depth 1 in outer
+        def inner():
+            for j in range(10):  # depth 1 in inner (should NOT trigger depth 2)
+                pass
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = v.run()
+    assert len(diags) == 0
+
+
+def test_perf_preceding_comment_and_specific_rule_suppression():
+    """Verify suppression via comment on preceding line and rule-specific tags."""
+    code = """
+def test_suppression():
+    # code-oracle: ignore-perf(PERF001)
+    for i in range(10):
+        for j in range(10):
+            pass
+
+    # Suppressed with generic tag on previous line
+    # code-oracle: ignore-perf
+    f = open("unclosed.txt")
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = v.run()
+    assert len(diags) == 0
+
+
+def test_cli_perf_lint_max_loop_depth_flag(tmp_path):
+    """Verify CLI --max-loop-depth flag adjusts loop complexity threshold."""
+    test_file = tmp_path / "matrix.py"
+    test_file.write_text(
+        """
+for i in range(10):
+    for j in range(10):
+        pass
+""",
+        encoding="utf-8",
+    )
+
+    # With default depth 2, it should detect depth 2 warning
+    r_def = subprocess.run(
+        ["code-oracle", "perf-lint", "--workspace", str(tmp_path), "--json"],
+        capture_output=True,
+        text=True,
+    )
+    data_def = json.loads(r_def.stdout)
+    assert data_def["total_diagnostics_count"] == 1
+
+    # With --max-loop-depth 3, depth 2 is permitted
+    r_depth3 = subprocess.run(
+        [
+            "code-oracle",
+            "perf-lint",
+            "--workspace",
+            str(tmp_path),
+            "--max-loop-depth",
+            "3",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    data_depth3 = json.loads(r_depth3.stdout)
+    assert data_depth3["total_diagnostics_count"] == 0
+
+
+def test_cli_perf_lint_paths_filter(tmp_path):
+    """Verify CLI perf-lint targets specific paths when specified."""
+    file_a = tmp_path / "file_a.py"
+    file_b = tmp_path / "file_b.py"
+
+    file_a.write_text("f = open('leak.txt')\n", encoding="utf-8")
+    file_b.write_text("f2 = open('leak2.txt')\n", encoding="utf-8")
+
+    # Target only file_a.py
+    r = subprocess.run(
+        [
+            "code-oracle",
+            "perf-lint",
+            "--workspace",
+            str(tmp_path),
+            str(file_a),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads(r.stdout)
+    assert data["scanned_files_count"] == 1
+    assert data["total_diagnostics_count"] == 1
+    assert "file_a.py" in data["diagnostics"][0]["file_path"]
+
+
+def test_fastmcp_server_lint_patterns_with_options(tmp_path):
+    """Verify FastMCP server lint endpoint with severity and max_depth options."""
+    py_file = tmp_path / "service.py"
+    py_file.write_text(
+        """
+for i in range(5):
+    for j in range(5):
+        pass
+""",
+        encoding="utf-8",
+    )
+
+    # Calling with severity="error" should ignore warnings
+    res_err = server_lint_performance_patterns(
+        file_path=str(py_file),
+        workspace_dir=str(tmp_path),
+        severity="error",
+    )
+    assert res_err["total_diagnostics_count"] == 0
+
+    # Calling with severity="warn" should include warnings
+    res_warn = server_lint_performance_patterns(
+        file_path=str(py_file),
+        workspace_dir=str(tmp_path),
+        severity="warn",
+    )
+    assert res_warn["total_diagnostics_count"] == 1

@@ -136,12 +136,21 @@ def run_server():
         def lint_performance_patterns(
             file_path: str,
             patch_content: Optional[str] = None,
+            workspace_dir: Optional[str] = None,
+            severity: str = "warn",
+            max_depth: Optional[int] = None,
         ) -> Dict[str, Any]:
             """
             Detect performance anti-patterns (nested loops, N+1 queries, resource leaks, blocking async calls) in sub-50ms.
             Multi-language support across Python, TypeScript, Go, and Rust.
             """
-            return run_perf_lint(file_path=file_path, patch_content=patch_content)
+            return run_perf_lint(
+                file_path=file_path,
+                patch_content=patch_content,
+                workspace_dir=workspace_dir,
+                severity=severity,
+                max_depth=max_depth,
+            )
 
         mcp.run()
     except ImportError:

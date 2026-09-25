@@ -233,11 +233,15 @@ def cmd_perf_lint(args: argparse.Namespace) -> int:
     from code_oracle.perf_lint import lint_performance
 
     ws = Path(args.workspace) if args.workspace else Path.cwd()
+    max_depth = getattr(args, "max_loop_depth", None)
+    if max_depth is None:
+        max_depth = getattr(args, "max_depth", 2)
+
     report = lint_performance(
         workspace_root=ws,
         paths=args.paths if args.paths else None,
         severity=args.severity,
-        max_depth=args.max_depth,
+        max_depth=max_depth,
     )
 
     fmt = "json" if getattr(args, "json", False) else args.format
@@ -537,9 +541,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum severity threshold to report (warn or error, default: warn)",
     )
     p_perf.add_argument(
+        "--max-loop-depth",
         "--max-depth",
+        dest="max_loop_depth",
         type=int,
-        default=None,
+        default=2,
         help="Loop depth threshold for PERF001 reporting (default: 2)",
     )
     p_perf.add_argument(

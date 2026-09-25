@@ -194,3 +194,22 @@ def test_cli_verify_neural_flag(cli_workspace):
     assert "risk_score" in data
     assert 0.0 <= data["risk_score"] <= 1.0
 
+
+def test_cli_perf_lint_command(cli_workspace):
+    res = subprocess.run(
+        [
+            "code-oracle",
+            "perf-lint",
+            "-w",
+            str(cli_workspace),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    data = json.loads(res.stdout)
+    assert "total_diagnostics_count" in data
+    assert "latency_ms" in data
+    assert data["total_diagnostics_count"] == 0
+
