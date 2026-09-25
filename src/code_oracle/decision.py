@@ -277,8 +277,10 @@ class LayaDecisionHead:
         weights_path: Optional[Path] = None,
         enabled: bool = False,
         quantize_int8: Optional[bool] = None,
+        risk_threshold: float = 0.5,
     ):
         self.enabled = enabled
+        self.risk_threshold = float(os.environ.get("CODE_ORACLE_RISK_THRESHOLD", str(risk_threshold)))
         self.quantize_int8 = (
             quantize_int8
             if quantize_int8 is not None
@@ -484,6 +486,7 @@ class LayaDecisionHead:
         violations: Optional[List[str]] = None,
         cycles: Optional[List[List[str]]] = None,
         taxonomy_threshold: float = 0.5,
+        risk_threshold: Optional[float] = None,
     ) -> EnhancedDecisionResult:
         """
         Evaluate linearized DSL subgraph with Multi-Task Risk Taxonomy
@@ -491,6 +494,7 @@ class LayaDecisionHead:
         """
         violations = violations or []
         cycles = cycles or []
+        eff_risk_threshold = self.risk_threshold if risk_threshold is None else risk_threshold
 
         # Hard rule: If deterministic symbolic gate caught a definite violation (cycle or arity),
         # symbolic gate has absolute veto power (REJECTED).
@@ -541,7 +545,7 @@ class LayaDecisionHead:
                     s = out["log_variance"]
                     epistemic_uncertainty = round(float(torch.exp(s).sqrt().item()), 4)
 
-                    pred_status = "APPROVED" if pred_risk < 0.5 else "REJECTED"
+                    pred_status = "APPROVED" if pred_risk < eff_risk_threshold else "REJECTED"
 
                     tax_scores = RiskTaxonomyScores(
                         breaking_public_api=round(float(tax_probs[0]), 4),
@@ -577,6 +581,8 @@ class LayaDecisionHead:
                     pred_status = status_ans["choice"]
                     pred_confidence = max(symbolic_confidence, float(status_ans["confidence"]))
                     pred_risk = float(risk_ans["score"]) / 4.0  # Normalize 0..4 to 0.0..1.0
+                    if pred_risk >= eff_risk_threshold:
+                        pred_status = "REJECTED"
 
                     # Compute epistemic uncertainty
                     epistemic_uncertainty = max(0.0001, round((1.0 - pred_confidence) ** 2, 4))
@@ -627,8 +633,12 @@ class LayaDecisionHead:
                 silent_logic_drift=0.85,
             )
 
+        fallback_status = symbolic_status
+        if fallback_status == "APPROVED" and risk >= eff_risk_threshold:
+            fallback_status = "REJECTED"
+
         return EnhancedDecisionResult(
-            status=symbolic_status,
+            status=fallback_status,
             confidence=symbolic_confidence,
             risk_score=risk,
             epistemic_uncertainty=0.02 if symbolic_status == "APPROVED" else 0.01,
