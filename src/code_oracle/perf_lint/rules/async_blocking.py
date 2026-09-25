@@ -36,6 +36,15 @@ class AsyncBlockingRule:
         clean_lower = clean.lower()
 
         if language == "python":
+            # Exclude async constructors and configuration primitives
+            if clean in (
+                "httpx.AsyncClient",
+                "httpx.Timeout",
+                "httpx.Limits",
+                "httpx.AsyncHTTPTransport",
+            ) or clean.startswith("httpx.Async"):
+                return False
+
             if clean in ("time.sleep", "sleep", "open", "urllib.request.urlopen", "os.system", "os.popen"):
                 return True
             if clean.startswith(("requests.", "subprocess.", "urllib.", "urllib3.", "httpx.")):
@@ -63,6 +72,14 @@ class AsyncBlockingRule:
 
         return False
 
+    @staticmethod
+    def is_awaited(call_node: Node) -> bool:
+        """Check if call_node is directly enclosed in an await expression."""
+        curr = call_node.parent
+        while curr is not None and curr.type == "parenthesized_expression":
+            curr = curr.parent
+        return curr is not None and curr.type in ("await", "await_expression")
+
     @classmethod
     def check(
         cls,
@@ -76,6 +93,10 @@ class AsyncBlockingRule:
     ) -> Optional[PerfDiagnostic]:
         """Evaluate if call is a blocking synchronous primitive in an async function."""
         if not is_async_context or not cls.is_blocking_call(callee_text, language):
+            return None
+
+        # Awaited expressions are non-blocking (e.g. await sleep(1))
+        if cls.is_awaited(call_node):
             return None
 
         lineno = call_node.start_point.row + 1

@@ -1009,3 +1009,269 @@ def test_nested():
     # The middle loop suppresses PERF001 for loop k and PERF002 for db.query(k)
     assert len(diags) == 0
 
+
+# ============================================================================
+# Regression Tests for Priorities 1 & 2 (Keyword Masking & Linter Cleanups)
+# ============================================================================
+
+def test_perf003_keyword_substring_masking_go_and_ts():
+    """Verify single-letter variables f, r, d are not falsely marked closed by defer/finally."""
+    go_code = """
+package main
+import "os"
+
+func testF() {
+    f, _ := os.Open("a.txt")
+    defer other.Close()
+}
+
+func testR() {
+    r, _ := os.Open("b.txt")
+    defer other.Close()
+}
+
+func testD() {
+    d, _ := os.Open("c.txt")
+    defer other.Close()
+}
+
+func testSafe() {
+    f, _ := os.Open("safe.txt")
+    defer f.Close()
+}
+"""
+    v_go = PerfLintVisitor(go_code, "main.go", "go")
+    diags_go = [d for d in v_go.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags_go) == 3
+    assert [d.lineno for d in diags_go] == [6, 11, 16]
+
+    ts_code = """
+import * as fs from "fs";
+
+function testF() {
+    const f = fs.openSync("a.txt", "r");
+    try {
+        work();
+    } finally {
+        other.destroy();
+    }
+}
+
+function testSafe() {
+    const f = fs.openSync("safe.txt", "r");
+    try {
+        work();
+    } finally {
+        fs.closeSync(f);
+    }
+}
+"""
+    v_ts = PerfLintVisitor(ts_code, "test.ts", "typescript")
+    diags_ts = [d for d in v_ts.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags_ts) == 1
+    assert diags_ts[0].lineno == 5
+
+
+def test_perf002_n_plus_one_dict_get_not_flagged():
+    """Verify dictionary .get() lookups (c.get, hc.get, config.get) are not flagged as N+1 queries."""
+    code = """
+def test_loop(items):
+    for item in items:
+        val1 = c.get("key")
+        val2 = hc.get("key")
+        val3 = config.get("timeout")
+        val4 = params.get("user_id")
+        resp = http_client.get("https://api.com")
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF002.value]
+    assert len(diags) == 1
+    assert diags[0].lineno == 8
+    assert "http_client.get" in diags[0].message
+
+
+def test_perf002_n_plus_one_camel_case_and_go_context_methods():
+    """Verify camelCase Prisma/Mongo queries and Go context db methods are flagged inside loops."""
+    ts_code = """
+async function processUsers(ids: string[]) {
+    for (const id of ids) {
+        const u1 = await prisma.user.findUnique({ where: { id } });
+        const u2 = await prisma.user.findFirst({ where: { id } });
+        const posts = await prisma.post.findMany({ where: { authorId: id } });
+        const doc = await mongo.collection.findOne({ _id: id });
+    }
+}
+"""
+    v_ts = PerfLintVisitor(ts_code, "test.ts", "typescript")
+    diags_ts = [d for d in v_ts.run() if d.rule_id == PerfRule.PERF002.value]
+    assert len(diags_ts) == 4
+    for d in diags_ts:
+        assert d.severity == Severity.WARN
+
+    go_code = """
+package main
+import "context"
+
+func queryLoop(ctx context.Context, ids []int) {
+    for _, id := range ids {
+        _ = db.QueryContext(ctx, "SELECT * FROM users WHERE id = ?", id)
+        _ = db.ExecContext(ctx, "UPDATE users SET active = 1 WHERE id = ?", id)
+        _ = db.QueryRowContext(ctx, "SELECT name FROM users WHERE id = ?", id)
+    }
+}
+"""
+    v_go = PerfLintVisitor(go_code, "main.go", "go")
+    diags_go = [d for d in v_go.run() if d.rule_id == PerfRule.PERF002.value]
+    assert len(diags_go) == 3
+    for d in diags_go:
+        assert d.severity == Severity.WARN
+
+
+def test_perf004_async_blocking_await_sleep_and_httpx_async_client():
+    """Verify await sleep and httpx.AsyncClient / httpx.Timeout are not flagged as blocking."""
+    code = """
+import asyncio
+from time import sleep
+
+async def worker():
+    await sleep(1)
+    await asyncio.sleep(1)
+    client = httpx.AsyncClient(timeout=httpx.Timeout(10))
+
+    sleep(1)
+    httpx.get("https://example.com")
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF004.value]
+    assert len(diags) == 2
+    assert [d.lineno for d in diags] == [10, 11]
+    assert any("sleep" in d.message for d in diags)
+    assert any("httpx.get" in d.message for d in diags)
+
+
+def test_perf003_factory_return_ownership_transfer():
+    """Verify returned opened resources (direct or assigned variable) are exempted as ownership transfer."""
+    py_code = """
+def f_direct():
+    return open("a.txt")
+
+def f_var():
+    f = open("b.txt")
+    return f
+
+def f_tuple():
+    f = open("c.txt")
+    return f, "ok"
+
+def f_leak():
+    f = open("d.txt")
+    return f.read()
+"""
+    v_py = PerfLintVisitor(py_code, "test.py", "python")
+    diags_py = [d for d in v_py.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags_py) == 1
+    assert diags_py[0].lineno == 14
+
+    go_code = """
+package main
+import "os"
+
+func f_direct() (*os.File, error) {
+    return os.Open("a.txt")
+}
+
+func f_var() (*os.File, error) {
+    f, err := os.Open("b.txt")
+    if err != nil {
+        return nil, err
+    }
+    return f, nil
+}
+
+func f_leak() error {
+    f, _ := os.Open("c.txt")
+    _ = f
+    return nil
+}
+"""
+    v_go = PerfLintVisitor(go_code, "main.go", "go")
+    diags_go = [d for d in v_go.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags_go) == 1
+    assert diags_go[0].lineno == 18
+
+    ts_code = """
+import * as fs from "fs";
+
+function f_direct() {
+    return fs.createReadStream("a.txt");
+}
+
+function f_var() {
+    const s = fs.createReadStream("b.txt");
+    return s;
+}
+
+function f_leak() {
+    const s = fs.createReadStream("c.txt");
+}
+"""
+    v_ts = PerfLintVisitor(ts_code, "test.ts", "typescript")
+    diags_ts = [d for d in v_ts.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags_ts) == 1
+    assert diags_ts[0].lineno == 14
+
+
+def test_perf003_python_try_finally_close():
+    """Verify Python try ... finally: ...close() properly marks resources as scoped."""
+    py_code = """
+def test_before_try():
+    f = open("data1.txt")
+    try:
+        data = f.read()
+    finally:
+        f.close()
+
+def test_inside_try():
+    try:
+        f = open("data2.txt")
+        data = f.read()
+    finally:
+        f.close()
+
+def test_no_close():
+    f = open("data3.txt")
+    try:
+        data = f.read()
+    finally:
+        print("cleanup finished")
+"""
+    v = PerfLintVisitor(py_code, "test.py", "python")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags) == 1
+    assert diags[0].lineno == 17
+
+
+def test_perf003_typescript_stream_pipe_argument():
+    """Verify TypeScript stream.pipe(writable) recognizes writable argument as scoped."""
+    ts_code = """
+import * as fs from "fs";
+
+function test_pipe_arg(reader: any) {
+    const writable = fs.createWriteStream("out1.txt");
+    reader.pipe(writable);
+}
+
+function test_pipe_inline(reader: any) {
+    reader.pipe(fs.createWriteStream("out2.txt"));
+}
+
+function test_unpiped() {
+    const leaked = fs.createWriteStream("out3.txt");
+}
+"""
+    v = PerfLintVisitor(ts_code, "test.ts", "typescript")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags) == 1
+    assert diags[0].lineno == 14
+
+

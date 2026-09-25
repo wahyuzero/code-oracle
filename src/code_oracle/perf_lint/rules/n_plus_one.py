@@ -28,9 +28,23 @@ DB_IO_METHODS: Set[str] = {
     "fetchmany",
     "raw_query",
     "queryrow",
+    "query_row",
     "post",
     "upsert",
     "save",
+    # Go context query and exec methods
+    "query_context",
+    "exec_context",
+    "query_row_context",
+    "querycontext",
+    "execcontext",
+    "queryrowcontext",
+    # Prisma / MongoDB camelCase variants (normalized and raw)
+    "findone",
+    "findmany",
+    "findunique",
+    "findfirst",
+    "findby",
 }
 
 HTTP_IO_PREFIXES: Tuple[str, ...] = (
@@ -53,9 +67,7 @@ HTTP_IO_PREFIXES: Tuple[str, ...] = (
     "httpclient.",
     "http_client.",
     "service.",
-    "c.get",
     "c.post",
-    "hc.get",
     "hc.post",
 )
 
@@ -68,15 +80,21 @@ DIRECT_IO_FUNCS: Set[str] = {
 }
 
 
+def _camel_to_snake(s: str) -> str:
+    """Convert camelCase/PascalCase to snake_case."""
+    return re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", s).lower()
+
+
 def extract_method_name(callee_text: str) -> str:
-    """Extract the last identifier (method name) from a callee expression."""
+    """Extract the last identifier (method name) from a callee expression with camelCase normalization."""
     clean = callee_text.strip().replace("\n", "")
     parts = re.split(r"\.|::", clean)
     if not parts:
         return ""
     last_part = parts[-1].strip()
     match = re.search(r"^[a-zA-Z_][a-zA-Z0-9_]*", last_part)
-    return match.group(0).lower() if match else last_part.lower()
+    raw = match.group(0) if match else last_part
+    return _camel_to_snake(raw)
 
 
 class NPlusOneRule:
@@ -90,11 +108,17 @@ class NPlusOneRule:
         clean = callee_text.strip().replace("\n", "")
         clean_lower = clean.lower()
         method = extract_method_name(clean)
+        method_raw = ""
+        parts = re.split(r"\.|::", clean)
+        if parts:
+            m = re.search(r"^[a-zA-Z_][a-zA-Z0-9_]*", parts[-1].strip())
+            if m:
+                method_raw = m.group(0).lower()
 
-        if method in DB_IO_METHODS:
+        if method in DB_IO_METHODS or method_raw in DB_IO_METHODS:
             return True
 
-        if clean_lower in DIRECT_IO_FUNCS:
+        if clean_lower in DIRECT_IO_FUNCS or method in DIRECT_IO_FUNCS:
             return True
 
         for prefix in HTTP_IO_PREFIXES:
