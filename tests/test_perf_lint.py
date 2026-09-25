@@ -1275,3 +1275,117 @@ function test_unpiped() {
     assert diags[0].lineno == 14
 
 
+def test_perf002_n_plus_one_dict_token_boundaries_no_false_positives():
+    """Verify dictionary lookups like feedback, interest, report do not trigger false N+1 positives."""
+    code = """
+def process(items):
+    for item in items:
+        # In-memory dictionary and set methods that contain substrings like db, rest, repo, table
+        fb = feedback.get(item.id)
+        rate = interest.get(item.id)
+        r = restaurant.get(item.id)
+        bag = handbag.get(item.id)
+        feedback.update(item)
+        report.update(item)
+        vegetable.update(item)
+
+        # Real DB and network operations
+        db.update(item)
+        user_db.update(item)
+        userRepo.update(item)
+        httpClient.get("https://api.com")
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF002.value]
+    assert len(diags) == 4
+    callees = [d.message for d in diags]
+    assert any("db.update" in m for m in callees)
+    assert any("user_db.update" in m for m in callees)
+    assert any("userRepo.update" in m for m in callees)
+    assert any("httpClient.get" in m for m in callees)
+    assert not any("feedback" in m for m in callees)
+    assert not any("interest" in m for m in callees)
+    assert not any("restaurant" in m for m in callees)
+    assert not any("handbag" in m for m in callees)
+    assert not any("report" in m for m in callees)
+    assert not any("vegetable" in m for m in callees)
+
+
+def test_perf003_resource_assigned_method_call_and_property_returns():
+    """Verify returning properties or results of methods on unclosed resources flags a leak."""
+    code = """
+def test_leak_read():
+    content = open("a.txt").read()
+    return content
+
+def test_leak_prop():
+    f = open("b.txt")
+    return f.name
+
+def test_leak_direct_prop():
+    return open("c.txt").name
+
+def test_safe_tuple_unpack():
+    x, f = "meta", open("d.txt")
+    return f
+"""
+    v = PerfLintVisitor(code, "test.py", "python")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags) == 3
+    # Lines for test_leak_read, test_leak_prop, test_leak_direct_prop
+    assert [d.lineno for d in diags] == [3, 7, 11]
+
+
+def test_perf003_unassigned_resource_not_masked_by_unrelated_finally():
+    """Verify unassigned resource calls are flagged even if an unrelated finally block is present."""
+    py_code = """
+def test():
+    open("a.txt")
+    try:
+        pass
+    finally:
+        socket.close()
+"""
+    v_py = PerfLintVisitor(py_code, "test.py", "python")
+    diags_py = [d for d in v_py.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags_py) == 1
+    assert diags_py[0].lineno == 3
+
+    ts_code = """
+import * as fs from "fs";
+function test() {
+    try {
+        fs.openSync("a.txt", "r");
+    } finally {
+        console.log("cleanup done");
+    }
+}
+"""
+    v_ts = PerfLintVisitor(ts_code, "test.ts", "typescript")
+    diags_ts = [d for d in v_ts.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags_ts) == 1
+    assert diags_ts[0].lineno == 5
+
+
+def test_perf003_typescript_res_pipe_no_substring_masking():
+    """Verify single-letter stream variable 's' is not falsely masked by res.pipe."""
+    ts_code = """
+import * as fs from "fs";
+
+function testLeakyS(res: any, something: any) {
+    const s = fs.createReadStream("a.txt");
+    res.pipe(something);
+}
+
+function testSafeS(something: any) {
+    const s = fs.createReadStream("safe.txt");
+    s.pipe(something);
+}
+"""
+    v = PerfLintVisitor(ts_code, "test.ts", "typescript")
+    diags = [d for d in v.run() if d.rule_id == PerfRule.PERF003.value]
+    assert len(diags) == 1
+    assert diags[0].lineno == 5
+
+
+

@@ -91,62 +91,73 @@ class UnclosedResourceRule:
 
     @staticmethod
     def _extract_assigned_var(call_node: Node, source_bytes: bytes, language: str) -> Optional[str]:
-        """Extract variable identifier to which the resource is assigned."""
+        """Extract variable identifier to which the resource is directly assigned."""
+        unwrapped = call_node
+        while unwrapped.parent and unwrapped.parent.type == "parenthesized_expression":
+            unwrapped = unwrapped.parent
+
+        p = unwrapped.parent
+        if p is None:
+            return None
+
         if language in ("typescript", "javascript"):
-            curr = call_node.parent
-            while curr is not None and curr.type not in (
-                "variable_declarator",
-                "assignment_expression",
-                "statement_block",
-                "program",
-            ):
-                curr = curr.parent
-            if curr and curr.type == "variable_declarator":
-                name_node = curr.child_by_field_name("name")
-                if name_node:
-                    return source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="ignore").strip()
-            elif curr and curr.type == "assignment_expression":
-                left = curr.child_by_field_name("left")
-                if left:
-                    return source_bytes[left.start_byte : left.end_byte].decode("utf-8", errors="ignore").strip()
+            if p.type == "variable_declarator":
+                val = p.child_by_field_name("value")
+                if val == unwrapped:
+                    name_node = p.child_by_field_name("name")
+                    if name_node and name_node.type == "identifier":
+                        return source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="ignore").strip()
+            elif p.type == "assignment_expression":
+                right = p.child_by_field_name("right")
+                if right == unwrapped:
+                    left = p.child_by_field_name("left")
+                    if left and left.type == "identifier":
+                        return source_bytes[left.start_byte : left.end_byte].decode("utf-8", errors="ignore").strip()
 
         elif language == "go":
-            curr = call_node.parent
-            while curr is not None and curr.type not in (
-                "short_var_declaration",
-                "assignment_statement",
-                "var_spec",
-                "block",
-            ):
-                curr = curr.parent
-            if curr and curr.type in ("short_var_declaration", "assignment_statement", "var_spec"):
-                left = curr.child_by_field_name("left")
-                if left is None:
-                    for ch in curr.children:
-                        if ch.type == "expression_list":
-                            left = ch
+            stmt = p if p.type in ("short_var_declaration", "assignment_statement", "var_spec") else p.parent
+            if stmt and stmt.type in ("short_var_declaration", "assignment_statement", "var_spec"):
+                right = stmt.child_by_field_name("right")
+                if right is None:
+                    for ch in stmt.children:
+                        if ch.type == "expression_list" and ch != stmt.child_by_field_name("left"):
+                            right = ch
                             break
-                if left:
-                    for ch in left.children:
-                        if ch.type == "identifier":
-                            return source_bytes[ch.start_byte : ch.end_byte].decode("utf-8", errors="ignore").strip()
+                is_in_right = (right == unwrapped) or (right and unwrapped in right.named_children)
+                if is_in_right:
+                    left = stmt.child_by_field_name("left")
+                    if left is None:
+                        for ch in stmt.children:
+                            if ch.type == "expression_list":
+                                left = ch
+                                break
+                    if left:
+                        if right and len(right.named_children) == len(left.named_children) and unwrapped in right.named_children:
+                            idx = right.named_children.index(unwrapped)
+                            if idx < len(left.named_children) and left.named_children[idx].type == "identifier":
+                                return source_bytes[left.named_children[idx].start_byte : left.named_children[idx].end_byte].decode("utf-8", errors="ignore").strip()
+                        for ch in left.children:
+                            if ch.type == "identifier":
+                                return source_bytes[ch.start_byte : ch.end_byte].decode("utf-8", errors="ignore").strip()
 
         elif language == "python":
-            curr = call_node.parent
-            while curr is not None and curr.type not in (
-                "assignment",
-                "function_definition",
-                "module",
-            ):
-                curr = curr.parent
-            if curr and curr.type == "assignment":
-                left = curr.child_by_field_name("left")
-                if left and left.type == "identifier":
-                    return source_bytes[left.start_byte : left.end_byte].decode("utf-8", errors="ignore").strip()
-                elif left and left.type in ("pattern_list", "tuple_pattern"):
-                    for ch in left.children:
-                        if ch.type == "identifier":
-                            return source_bytes[ch.start_byte : ch.end_byte].decode("utf-8", errors="ignore").strip()
+            if p.type == "assignment":
+                right = p.child_by_field_name("right")
+                if right == unwrapped:
+                    left = p.child_by_field_name("left")
+                    if left and left.type == "identifier":
+                        return source_bytes[left.start_byte : left.end_byte].decode("utf-8", errors="ignore").strip()
+            elif p.type in ("expression_list", "tuple"):
+                assign = p.parent
+                if assign and assign.type == "assignment" and assign.child_by_field_name("right") == p:
+                    named_rhs = p.named_children
+                    if unwrapped in named_rhs:
+                        idx = named_rhs.index(unwrapped)
+                        left = assign.child_by_field_name("left")
+                        if left and left.type in ("pattern_list", "tuple_pattern"):
+                            named_lhs = left.named_children
+                            if idx < len(named_lhs) and named_lhs[idx].type == "identifier":
+                                return source_bytes[named_lhs[idx].start_byte : named_lhs[idx].end_byte].decode("utf-8", errors="ignore").strip()
 
         return None
 
@@ -168,15 +179,16 @@ class UnclosedResourceRule:
                 break
             if curr.type == "return_statement":
                 # Ensure call_node is not simply calling a method (e.g. open().read())
+                # or accessing a property (e.g. open().name)
                 p = call_node.parent
+                while p and p.type == "parenthesized_expression":
+                    p = p.parent
                 if p and p.type in ("attribute", "member_expression", "selector_expression"):
-                    gp = p.parent
-                    if gp and gp.type in ("call", "call_expression") and gp.child_by_field_name("function") == p:
-                        if language in ("typescript", "javascript"):
-                            prop = p.child_by_field_name("property")
-                            if prop and source_bytes[prop.start_byte : prop.end_byte].strip() == b"pipe":
-                                return True
-                        return False
+                    if language in ("typescript", "javascript"):
+                        prop = p.child_by_field_name("property")
+                        if prop and source_bytes[prop.start_byte : prop.end_byte].strip() == b"pipe":
+                            return True
+                    return False
                 return True
             curr = curr.parent
 
@@ -210,10 +222,14 @@ class UnclosedResourceRule:
                     ident = source_bytes[n.start_byte : n.end_byte].decode("utf-8", errors="ignore").strip()
                     if ident == var_name:
                         p = n.parent
+                        while p and p.type == "parenthesized_expression":
+                            p = p.parent
                         if p and p.type in ("attribute", "member_expression", "selector_expression"):
-                            gp = p.parent
-                            if gp and gp.type in ("call", "call_expression") and gp.child_by_field_name("function") == p:
-                                return False
+                            if language in ("typescript", "javascript"):
+                                prop = p.child_by_field_name("property")
+                                if prop and source_bytes[prop.start_byte : prop.end_byte].strip() == b"pipe":
+                                    return True
+                            return False
                         return True
                 for ch in n.children:
                     if check_node(ch):
@@ -273,44 +289,40 @@ class UnclosedResourceRule:
 
             if enclosing is not None:
                 var_name = cls._extract_assigned_var(call_node, source_bytes, language)
-
-                def has_finally_close(n: Node) -> bool:
-                    if n.type == "try_statement":
-                        for c in n.children:
-                            if c.type == "finally_clause":
-                                txt = source_bytes[c.start_byte : c.end_byte].decode("utf-8", errors="ignore")
-                                if "close" in txt.lower():
-                                    if var_name:
+                if var_name:
+                    def has_finally_close(n: Node) -> bool:
+                        if n.type == "try_statement":
+                            for c in n.children:
+                                if c.type == "finally_clause":
+                                    txt = source_bytes[c.start_byte : c.end_byte].decode("utf-8", errors="ignore")
+                                    if "close" in txt.lower():
                                         if re.search(rf"\b{re.escape(var_name)}\b", txt):
                                             return True
-                                    else:
-                                        return True
-                    for ch in n.children:
-                        if ch.type == "function_definition":
-                            continue
-                        if has_finally_close(ch):
-                            return True
-                    return False
+                        for ch in n.children:
+                            if ch.type == "function_definition":
+                                continue
+                            if has_finally_close(ch):
+                                return True
+                        return False
 
-                if has_finally_close(enclosing):
-                    return True
+                    if has_finally_close(enclosing):
+                        return True
 
             return False
 
         elif language in ("typescript", "javascript"):
+            var_name = cls._extract_assigned_var(call_node, source_bytes, language)
+
             # 1. Ancestor check: inside try block with finally
             curr = call_node.parent
             while curr is not None:
                 if curr.type == "try_statement":
                     for c in curr.children:
                         if c.type == "finally_clause":
-                            var_name = cls._extract_assigned_var(call_node, source_bytes, language)
                             if var_name:
                                 txt = source_bytes[c.start_byte : c.end_byte].decode("utf-8", errors="ignore")
                                 if re.search(rf"\b{re.escape(var_name)}\b", txt):
                                     return True
-                            else:
-                                return True
                 if curr.type in ("function_declaration", "arrow_function", "method_definition"):
                     break
                 curr = curr.parent
@@ -342,31 +354,39 @@ class UnclosedResourceRule:
                     break
                 enclosing = enclosing.parent
 
-            if enclosing is not None:
-                var_name = cls._extract_assigned_var(call_node, source_bytes, language)
-                if var_name:
-                    def check_block(n: Node) -> bool:
-                        if n.type == "try_statement":
-                            for c in n.children:
-                                if c.type == "finally_clause":
-                                    txt = source_bytes[c.start_byte : c.end_byte].decode("utf-8", errors="ignore")
-                                    if re.search(rf"\b{re.escape(var_name)}\b", txt):
+            if enclosing is not None and var_name:
+                def check_block(n: Node) -> bool:
+                    if n.type == "try_statement":
+                        for c in n.children:
+                            if c.type == "finally_clause":
+                                txt = source_bytes[c.start_byte : c.end_byte].decode("utf-8", errors="ignore")
+                                if re.search(rf"\b{re.escape(var_name)}\b", txt):
+                                    return True
+                    elif n.type == "call_expression":
+                        fn = n.child_by_field_name("function")
+                        if fn and fn.type == "member_expression":
+                            prop = fn.child_by_field_name("property")
+                            prop_name = source_bytes[prop.start_byte : prop.end_byte].decode("utf-8", errors="ignore").strip() if prop else ""
+                            if prop_name == "pipe":
+                                obj = fn.child_by_field_name("object")
+                                if obj:
+                                    obj_name = source_bytes[obj.start_byte : obj.end_byte].decode("utf-8", errors="ignore").strip()
+                                    if obj_name == var_name:
                                         return True
-                        elif n.type == "call_expression":
-                            txt = source_bytes[n.start_byte : n.end_byte].decode("utf-8", errors="ignore")
-                            if f"{var_name}.pipe" in txt:
-                                return True
-                            if re.search(rf"\.pipe\s*\([\s\S]*?\b{re.escape(var_name)}\b", txt):
-                                return True
-                        for ch in n.children:
-                            if ch.type in ("function_declaration", "arrow_function", "method_definition"):
-                                continue
-                            if check_block(ch):
-                                return True
-                        return False
+                                args = n.child_by_field_name("arguments")
+                                if args:
+                                    args_txt = source_bytes[args.start_byte : args.end_byte].decode("utf-8", errors="ignore")
+                                    if re.search(rf"\b{re.escape(var_name)}\b", args_txt):
+                                        return True
+                    for ch in n.children:
+                        if ch.type in ("function_declaration", "arrow_function", "method_definition"):
+                            continue
+                        if check_block(ch):
+                            return True
+                    return False
 
-                    if check_block(enclosing):
-                        return True
+                if check_block(enclosing):
+                    return True
 
             return False
 

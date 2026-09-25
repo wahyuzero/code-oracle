@@ -80,9 +80,53 @@ DIRECT_IO_FUNCS: Set[str] = {
 }
 
 
+DB_RECEIVER_KEYWORDS: Set[str] = {
+    "db",
+    "database",
+    "repo",
+    "repository",
+    "table",
+    "tables",
+    "model",
+    "models",
+    "conn",
+    "connection",
+    "cursor",
+    "collection",
+    "collections",
+    "dao",
+    "entity",
+    "entities",
+    "sql",
+}
+
+NETWORK_GET_RECEIVER_KEYWORDS: Set[str] = {
+    "http",
+    "client",
+    "request",
+    "requests",
+    "api",
+    "session",
+    "service",
+    "db",
+    "fetch",
+    "conn",
+    "connection",
+    "rest",
+    "remote",
+}
+
+
 def _camel_to_snake(s: str) -> str:
     """Convert camelCase/PascalCase to snake_case."""
     return re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", s).lower()
+
+
+def _receiver_has_keyword(receiver: str, keywords: Set[str]) -> bool:
+    """Check if receiver identifier contains any target keywords as distinct tokens."""
+    snake = _camel_to_snake(receiver)
+    tokens = set(re.split(r"[^a-z0-9]+", snake))
+    return bool(tokens & keywords)
 
 
 def extract_method_name(callee_text: str) -> str:
@@ -128,48 +172,16 @@ class NPlusOneRule:
         # Check for database write calls (update/insert/delete) with DB-related receiver
         # to prevent false positives on set.update(), dict.update(), list.insert()
         if method in ("update", "insert", "delete"):
-            parts = re.split(r"\.|::", clean_lower)
             if len(parts) >= 2:
                 receiver = parts[-2]
-                if any(
-                    kw in receiver
-                    for kw in (
-                        "db",
-                        "database",
-                        "repo",
-                        "table",
-                        "model",
-                        "conn",
-                        "cursor",
-                        "collection",
-                        "dao",
-                        "entity",
-                        "sql",
-                    )
-                ):
+                if _receiver_has_keyword(receiver, DB_RECEIVER_KEYWORDS):
                     return True
 
         # Check for network/database .get(...) calls while preventing dict.get() false positives
         if method == "get":
-            parts = re.split(r"\.|::", clean_lower)
             if len(parts) >= 2:
                 receiver = parts[-2]
-                if any(
-                    kw in receiver
-                    for kw in (
-                        "http",
-                        "client",
-                        "request",
-                        "api",
-                        "session",
-                        "service",
-                        "db",
-                        "fetch",
-                        "conn",
-                        "rest",
-                        "remote",
-                    )
-                ):
+                if _receiver_has_keyword(receiver, NETWORK_GET_RECEIVER_KEYWORDS):
                     return True
 
         return False
