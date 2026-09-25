@@ -204,6 +204,65 @@ class ModernBERTMultiTaskModel(nn.Module):
         }
 
 
+class ModernBERTWithMultiTaskHead(nn.Module):
+    """
+    End-to-end ModernBERT encoder coupled with 3 multi-task evaluation heads:
+    1. Continuous calibrated risk regression (0.0 to 1.0)
+    2. Multi-label risk taxonomy (5 classes)
+    3. Epistemic uncertainty estimation
+    Matches the weights stored in fine-tuned model.safetensors.
+    """
+
+    def __init__(self, encoder_name: str = "answerdotai/ModernBERT-base"):
+        super().__init__()
+        from transformers import AutoModel
+
+        self.encoder = AutoModel.from_pretrained(encoder_name)
+        hidden_size = self.encoder.config.hidden_size
+        self.risk_head = nn.Sequential(
+            nn.Linear(hidden_size, 256),
+            nn.GELU(),
+            nn.LayerNorm(256),
+            nn.Linear(256, 1),
+        )
+        self.taxonomy_head = nn.Sequential(
+            nn.Linear(hidden_size, 256),
+            nn.GELU(),
+            nn.LayerNorm(256),
+            nn.Linear(256, 5),
+        )
+        self.uncertainty_head = nn.Sequential(
+            nn.Linear(hidden_size, 128),
+            nn.GELU(),
+            nn.Linear(128, 1),
+        )
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> Dict[str, torch.Tensor]:
+        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        token_embeddings = outputs.last_hidden_state
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+        h_pool = sum_embeddings / sum_mask
+
+        risk_score = torch.sigmoid(self.risk_head(h_pool))
+        taxonomy_logits = self.taxonomy_head(h_pool)
+        taxonomy_probs = torch.sigmoid(taxonomy_logits)
+        s = self.uncertainty_head(h_pool)
+        log_variance = torch.clamp(s, min=-6.0, max=6.0)
+        variance = torch.exp(log_variance)
+        confidence = 1.0 - torch.clamp(torch.sqrt(variance), min=0.0, max=1.0)
+
+        return {
+            "risk_score": risk_score,
+            "taxonomy_logits": taxonomy_logits,
+            "taxonomy_probs": taxonomy_probs,
+            "log_variance": log_variance,
+            "variance": variance,
+            "confidence": confidence,
+        }
+
+
 class LayaDecisionHead:
     """
     Lean neural decision head interfacing with Laya ModernBERT (421M large or 164M base).
@@ -227,6 +286,8 @@ class LayaDecisionHead:
         )
         self.weights_path = self._resolve_weights_path(weights_path) if enabled else None
         self.agent = None
+        self.pytorch_multitask_model: Optional[ModernBERTWithMultiTaskHead] = None
+        self.tokenizer = None
         self.multi_task_model: ModernBERTMultiTaskModel = ModernBERTMultiTaskModel()
         self._loaded = False
         if self.enabled and self.weights_path and self.weights_path.exists():
@@ -325,11 +386,33 @@ class LayaDecisionHead:
             import contextlib
             import io
             import warnings
-            import laya
 
             # Auto-tune CPU threads before model initialization
             self._tune_cpu_threads()
 
+            # 1. Check for native Multi-Task PyTorch safetensors model
+            safetensors_file = self.weights_path / "model.safetensors"
+            if safetensors_file.exists():
+                try:
+                    from safetensors.torch import load_file
+                    from transformers import AutoTokenizer
+
+                    logger.info(f"Checking native Multi-Task ModernBERT weights from {self.weights_path}")
+                    sd = load_file(str(safetensors_file))
+                    if any("risk_head" in k for k in sd.keys()):
+                        mt_model = ModernBERTWithMultiTaskHead()
+                        mt_model.load_state_dict(sd)
+                        mt_model.eval()
+                        self.pytorch_multitask_model = mt_model
+                        self.tokenizer = AutoTokenizer.from_pretrained(str(self.weights_path))
+                        self._loaded = True
+                        logger.info("Successfully loaded native Multi-Task ModernBERT model")
+                        return
+                except Exception as e_native:
+                    logger.debug(f"Native Multi-Task loading skipped: {e_native}")
+
+            # 2. Legacy laya.load loader
+            import laya
             logger.info(f"Loading fine-tuned Laya weights from {self.weights_path}")
             with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 warnings.simplefilter("ignore")
@@ -354,6 +437,7 @@ class LayaDecisionHead:
         except Exception as e:
             logger.warning(f"Could not load Laya model from {self.weights_path}: {e}")
             self.agent = None
+            self.pytorch_multitask_model = None
             self._loaded = False
 
     def enable_neural_head(self) -> bool:
@@ -369,7 +453,7 @@ class LayaDecisionHead:
     @property
     def is_neural_enabled(self) -> bool:
         """Returns True if fine-tuned neural weights are loaded and active."""
-        return self._loaded and self.agent is not None
+        return self._loaded and (self.pytorch_multitask_model is not None or self.agent is not None)
 
     def predict(
         self,
@@ -438,48 +522,90 @@ class LayaDecisionHead:
 
         # If neural weights are available, run inference
         if self.is_neural_enabled:
-            try:
-                import contextlib
-                import io
-                import warnings
-                with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()):
-                    warnings.simplefilter("ignore")
-                    res = self.agent.predict(linearized_dsl, VERIFICATION_QUESTIONS)
-                status_ans = res["answers"]["status"]
-                risk_ans = res["answers"]["risk"]
+            # 1. Native Multi-Task PyTorch Model
+            if self.pytorch_multitask_model is not None and self.tokenizer is not None:
+                try:
+                    import torch
+                    tokens = self.tokenizer(
+                        linearized_dsl,
+                        return_tensors="pt",
+                        truncation=True,
+                        max_length=512,
+                    )
+                    with torch.no_grad():
+                        out = self.pytorch_multitask_model(tokens["input_ids"], tokens["attention_mask"])
 
-                pred_status = status_ans["choice"]
-                pred_confidence = max(symbolic_confidence, float(status_ans["confidence"]))
-                pred_risk = float(risk_ans["score"]) / 4.0  # Normalize 0..4 to 0.0..1.0
+                    pred_risk = round(out["risk_score"].item(), 4)
+                    tax_probs = out["taxonomy_probs"].squeeze(0).tolist()
+                    pred_conf = round(out["confidence"].item(), 4)
+                    s = out["log_variance"]
+                    epistemic_uncertainty = round(float(torch.exp(s).sqrt().item()), 4)
 
-                # Compute epistemic uncertainty
-                epistemic_uncertainty = max(0.0001, round((1.0 - pred_confidence) ** 2, 4))
+                    pred_status = "APPROVED" if pred_risk < 0.5 else "REJECTED"
 
-                # Multi-label taxonomy derived from neural risk and topological features
-                has_api_drift = any(k in linearized_dsl for k in ["PARAM", "SIG", "ARITY", "DELETED"])
-                has_cycle_signal = any(k in linearized_dsl for k in ["CYCLE", "MUTUAL", "SCC"])
-                has_sec_signal = any(k in linearized_dsl.lower() for k in ["secret", "auth", "token", "pwd", "taint"])
-                has_perf_signal = any(k in linearized_dsl for k in ["LOOP", "QUERY", "PERF"])
+                    tax_scores = RiskTaxonomyScores(
+                        breaking_public_api=round(float(tax_probs[0]), 4),
+                        security_surface=round(float(tax_probs[1]), 4),
+                        concurrency_hazard=round(float(tax_probs[2]), 4),
+                        performance_regression=round(float(tax_probs[3]), 4),
+                        silent_logic_drift=round(float(tax_probs[4]), 4),
+                    )
+                    return EnhancedDecisionResult(
+                        status=pred_status,
+                        confidence=pred_conf,
+                        risk_score=pred_risk,
+                        epistemic_uncertainty=epistemic_uncertainty,
+                        risk_taxonomy=tax_scores,
+                        active_risk_categories=tax_scores.active_categories(threshold=taxonomy_threshold),
+                        is_neural_calibrated=True,
+                    )
+                except Exception as e_nt:
+                    logger.warning(f"Native Multi-Task inference error: {e_nt}. Falling back.")
 
-                tax_scores = RiskTaxonomyScores(
-                    breaking_public_api=round(min(0.99, max(0.02, pred_risk * 1.2 if has_api_drift else pred_risk * 0.4)), 4),
-                    security_surface=round(min(0.99, max(0.01, 0.85 if has_sec_signal else pred_risk * 0.15)), 4),
-                    concurrency_hazard=round(min(0.99, max(0.01, 0.90 if has_cycle_signal else pred_risk * 0.2)), 4),
-                    performance_regression=round(min(0.99, max(0.01, 0.85 if has_perf_signal else pred_risk * 0.2)), 4),
-                    silent_logic_drift=round(min(0.95, max(0.02, pred_risk * 0.7)), 4),
-                )
+            # 2. Legacy laya agent
+            elif self.agent is not None:
+                try:
+                    import contextlib
+                    import io
+                    import warnings
+                    with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()):
+                        warnings.simplefilter("ignore")
+                        res = self.agent.predict(linearized_dsl, VERIFICATION_QUESTIONS)
+                    status_ans = res["answers"]["status"]
+                    risk_ans = res["answers"]["risk"]
 
-                return EnhancedDecisionResult(
-                    status=pred_status,
-                    confidence=pred_confidence,
-                    risk_score=pred_risk,
-                    epistemic_uncertainty=epistemic_uncertainty,
-                    risk_taxonomy=tax_scores,
-                    active_risk_categories=tax_scores.active_categories(threshold=taxonomy_threshold),
-                    is_neural_calibrated=True,
-                )
-            except Exception as e:
-                logger.warning(f"Laya neural inference error: {e}. Falling back to symbolic gate.")
+                    pred_status = status_ans["choice"]
+                    pred_confidence = max(symbolic_confidence, float(status_ans["confidence"]))
+                    pred_risk = float(risk_ans["score"]) / 4.0  # Normalize 0..4 to 0.0..1.0
+
+                    # Compute epistemic uncertainty
+                    epistemic_uncertainty = max(0.0001, round((1.0 - pred_confidence) ** 2, 4))
+
+                    # Multi-label taxonomy derived from neural risk and topological features
+                    has_api_drift = any(k in linearized_dsl for k in ["PARAM", "SIG", "ARITY", "DELETED"])
+                    has_cycle_signal = any(k in linearized_dsl for k in ["CYCLE", "MUTUAL", "SCC"])
+                    has_sec_signal = any(k in linearized_dsl.lower() for k in ["secret", "auth", "token", "pwd", "taint"])
+                    has_perf_signal = any(k in linearized_dsl for k in ["LOOP", "QUERY", "PERF"])
+
+                    tax_scores = RiskTaxonomyScores(
+                        breaking_public_api=round(min(0.99, max(0.02, pred_risk * 1.2 if has_api_drift else pred_risk * 0.4)), 4),
+                        security_surface=round(min(0.99, max(0.01, 0.85 if has_sec_signal else pred_risk * 0.15)), 4),
+                        concurrency_hazard=round(min(0.99, max(0.01, 0.90 if has_cycle_signal else pred_risk * 0.2)), 4),
+                        performance_regression=round(min(0.99, max(0.01, 0.85 if has_perf_signal else pred_risk * 0.2)), 4),
+                        silent_logic_drift=round(min(0.95, max(0.02, pred_risk * 0.7)), 4),
+                    )
+
+                    return EnhancedDecisionResult(
+                        status=pred_status,
+                        confidence=pred_confidence,
+                        risk_score=pred_risk,
+                        epistemic_uncertainty=epistemic_uncertainty,
+                        risk_taxonomy=tax_scores,
+                        active_risk_categories=tax_scores.active_categories(threshold=taxonomy_threshold),
+                        is_neural_calibrated=True,
+                    )
+                except Exception as e:
+                    logger.warning(f"Laya neural inference error: {e}. Falling back to symbolic gate.")
 
         # Fallback to deterministic symbolic gate result
         if symbolic_status == "APPROVED":
