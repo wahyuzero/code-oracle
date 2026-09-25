@@ -228,6 +228,36 @@ def cmd_dead_code(args: argparse.Namespace) -> int:
     return 1 if report.dead_symbols_count > 0 else 0
 
 
+def cmd_perf_lint(args: argparse.Namespace) -> int:
+    """Execute performance anti-pattern and resource leak scan."""
+    from code_oracle.perf_lint import lint_performance
+
+    ws = Path(args.workspace) if args.workspace else Path.cwd()
+    report = lint_performance(
+        workspace_root=ws,
+        paths=args.paths if args.paths else None,
+        severity=args.severity,
+        max_depth=args.max_depth,
+    )
+
+    fmt = "json" if getattr(args, "json", False) else args.format
+
+    if fmt == "json":
+        print(json.dumps(report.to_dict(), indent=2))
+    elif fmt == "text":
+        print(report.format_text())
+    else:  # "table"
+        print(report.format_table())
+
+    fail_on = args.fail_on.lower() if args.fail_on else "error"
+    if fail_on == "none":
+        return 0
+    elif fail_on == "warn":
+        return 1 if (report.warnings_count > 0 or report.errors_count > 0) else 0
+    else:  # "error"
+        return 1 if report.errors_count > 0 else 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Launch the FastMCP server."""
     run_server()
@@ -480,6 +510,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output machine-readable JSON (alias for --format json)",
     )
     p_dead.set_defaults(func=cmd_dead_code)
+
+    # perf-lint
+    p_perf = subparsers.add_parser(
+        "perf-lint",
+        help="Detect performance anti-patterns and resource leaks across workspace",
+    )
+    p_perf.add_argument(
+        "paths",
+        nargs="*",
+        default=[],
+        help="Optional target files or directories to lint (default: workspace root)",
+    )
+    p_perf.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_perf.add_argument(
+        "--format",
+        "-f",
+        choices=["table", "json", "text"],
+        default="table",
+        help="Output format (table, json, text)",
+    )
+    p_perf.add_argument(
+        "--severity",
+        choices=["warn", "error"],
+        default="warn",
+        help="Minimum severity threshold to report (warn or error, default: warn)",
+    )
+    p_perf.add_argument(
+        "--max-depth",
+        type=int,
+        default=None,
+        help="Loop depth threshold for PERF001 reporting (default: 2)",
+    )
+    p_perf.add_argument(
+        "--fail-on",
+        choices=["warn", "error", "none"],
+        default="error",
+        help="Exit with non-zero exit code if findings meet threshold (default: error)",
+    )
+    p_perf.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON (alias for --format json)",
+    )
+    p_perf.set_defaults(func=cmd_perf_lint)
 
     # serve
     p_serve = subparsers.add_parser("serve", help="Run the Lean FastMCP server")

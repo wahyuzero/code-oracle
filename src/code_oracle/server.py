@@ -68,6 +68,33 @@ def run_dead_code_detection(
 detect_dead_code = run_dead_code_detection
 
 
+def run_perf_lint(
+    file_path: str,
+    patch_content: Optional[str] = None,
+    workspace_dir: Optional[str] = None,
+    severity: str = "warn",
+    max_depth: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Performance anti-pattern and resource leak detection endpoint for AI coding agents.
+    Evaluates AST subtrees in sub-50ms across Python, TypeScript, Go, and Rust.
+    """
+    from code_oracle.perf_lint import lint_performance_patterns as _lint_patterns
+
+    engine = get_engine(workspace_dir)
+    report = _lint_patterns(
+        file_path=file_path,
+        patch_content=patch_content,
+        workspace_root=engine.workspace_root,
+        severity=severity,
+        max_depth=max_depth,
+    )
+    return report.to_dict()
+
+
+lint_performance_patterns = run_perf_lint
+
+
 def run_server():
     """Start the FastMCP server."""
     try:
@@ -104,6 +131,17 @@ def run_server():
                 min_lines=min_lines,
                 include_unexported=include_unexported,
             )
+
+        @mcp.tool()
+        def lint_performance_patterns(
+            file_path: str,
+            patch_content: Optional[str] = None,
+        ) -> Dict[str, Any]:
+            """
+            Detect performance anti-patterns (nested loops, N+1 queries, resource leaks, blocking async calls) in sub-50ms.
+            Multi-language support across Python, TypeScript, Go, and Rust.
+            """
+            return run_perf_lint(file_path=file_path, patch_content=patch_content)
 
         mcp.run()
     except ImportError:
