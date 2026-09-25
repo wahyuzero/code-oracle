@@ -79,6 +79,7 @@ graphify-out/
 
 # Mined Raw Repositories & Temporary Outputs
 mined_repos/
+benchmarks_repos/
 /tmp/code_oracle_mined_repos/
 dataset_output/
 
