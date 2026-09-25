@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from code_oracle.dataset import DatasetGenerator, DatasetRecord, TEMPLATES
+from code_oracle.dataset import DatasetGenerator, DatasetRecord, TEMPLATES, TAXONOMY_CLASSES
 
 
 def test_dataset_record_schema():
@@ -22,12 +22,25 @@ def test_dataset_record_schema():
         language="python",
     )
     d = rec.to_dict()
-    assert set(d.keys()) == {"input_dsl", "label", "risk_score", "category", "language"}
+    assert set(d.keys()) == {
+        "input_dsl",
+        "label",
+        "risk_score",
+        "category",
+        "language",
+        "taxonomy_labels",
+        "symbolic_gate_passed",
+        "source_type",
+    }
     assert d["label"] == 1
     assert d["risk_score"] == 0.05
     assert d["category"] == "clean_pass"
     assert d["language"] == "python"
     assert isinstance(d["input_dsl"], str)
+    assert isinstance(d["taxonomy_labels"], dict)
+    assert set(d["taxonomy_labels"].keys()) == set(TAXONOMY_CLASSES)
+    assert d["symbolic_gate_passed"] is True
+    assert d["source_type"] == "mutation_subtle"
 
 
 def test_synthetic_mutation_categories():
@@ -111,6 +124,9 @@ def test_dataset_jsonl_schema_validation():
                         "risk_score",
                         "category",
                         "language",
+                        "taxonomy_labels",
+                        "symbolic_gate_passed",
+                        "source_type",
                     }, f"Mismatch in {fname} line {idx}"
                     # Verify types
                     assert isinstance(data["input_dsl"], str)
@@ -120,6 +136,10 @@ def test_dataset_jsonl_schema_validation():
                     assert 0.0 <= data["risk_score"] <= 1.0
                     assert isinstance(data["category"], str)
                     assert data["language"] in ("python", "typescript", "go", "rust")
+                    assert isinstance(data["taxonomy_labels"], dict)
+                    assert set(data["taxonomy_labels"].keys()) == set(TAXONOMY_CLASSES)
+                    assert isinstance(data["symbolic_gate_passed"], bool)
+                    assert isinstance(data["source_type"], str)
 
 
 def test_dataset_generator_cli_execution():
@@ -210,4 +230,245 @@ def test_mine_multilang_repository():
         assert "clean_pass" in categories
         assert "arity_breaking" in categories
         assert all(r.language == "go" for r in records)
+
+
+def test_dataset_record_multitask_features():
+    # 1. Clean pass -> zero taxonomy
+    rec_pass = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py::f\n[GATE]\nSTATUS: APPROVED",
+        label=1,
+        risk_score=0.04,
+        category="clean_pass",
+        language="python",
+    )
+    assert all(v == 0.0 for v in rec_pass.taxonomy_labels.values())
+
+    # 2. Category mapping
+    rec_sec = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py::f\n[GATE]\nSTATUS: APPROVED",
+        label=0,
+        risk_score=0.91,
+        category="security_surface",
+        language="python",
+    )
+    assert rec_sec.taxonomy_labels["SecuritySurface"] > 0.8
+
+    rec_conc = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py::f\n[GATE]\nSTATUS: APPROVED",
+        label=0,
+        risk_score=0.88,
+        category="concurrency_hazard",
+        language="python",
+    )
+    assert rec_conc.taxonomy_labels["ConcurrencyHazard"] > 0.8
+
+    rec_perf = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py::f\n[GATE]\nSTATUS: APPROVED",
+        label=0,
+        risk_score=0.85,
+        category="performance_regression",
+        language="python",
+    )
+    assert rec_perf.taxonomy_labels["PerformanceRegression"] > 0.8
+
+    rec_api = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py::f\n[GATE]\nSTATUS: APPROVED",
+        label=0,
+        risk_score=0.95,
+        category="breaking_public_api",
+        language="python",
+    )
+    assert rec_api.taxonomy_labels["BreakingPublicAPI"] > 0.8
+
+    rec_drift = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py::f\n[GATE]\nSTATUS: APPROVED",
+        label=0,
+        risk_score=0.90,
+        category="silent_logic_drift",
+        language="python",
+    )
+    assert rec_drift.taxonomy_labels["SilentLogicDrift"] > 0.8
+
+    # 3. Roundtrip dictionary conversion
+    d = rec_sec.to_dict()
+    restored = DatasetRecord.from_dict(d)
+    assert restored.category == rec_sec.category
+    assert restored.label == rec_sec.label
+    assert restored.risk_score == round(rec_sec.risk_score, 4)
+    assert restored.taxonomy_labels == rec_sec.taxonomy_labels
+    assert restored.symbolic_gate_passed == rec_sec.symbolic_gate_passed
+    assert restored.source_type == rec_sec.source_type
+
+
+def test_symbolic_gate_filtering():
+    # With filter_symbolic_gate=True, only mutations passing the symbolic gate are retained
+    gen_filtered = DatasetGenerator(languages=["python"], seed=42, filter_symbolic_gate=True)
+    records_filtered = gen_filtered.generate_synthetic_dataset(num_samples=20)
+
+    assert len(records_filtered) > 0
+    for r in records_filtered:
+        assert r.symbolic_gate_passed is True
+        # Gate-filtered samples should pass symbolic gate
+        assert "STATUS: APPROVED" in r.input_dsl
+
+    # With filter_symbolic_gate=False, hard structural violations are also present
+    gen_unfiltered = DatasetGenerator(languages=["python"], seed=42, filter_symbolic_gate=False)
+    records_unfiltered = gen_unfiltered.generate_synthetic_dataset(num_samples=20)
+
+    has_failed_gate = any(not r.symbolic_gate_passed for r in records_unfiltered)
+    assert has_failed_gate is True
+
+
+def test_subtle_semantic_mutations_across_languages():
+    languages = ["python", "typescript", "go", "rust"]
+    for lang in languages:
+        gen = DatasetGenerator(languages=[lang], seed=42)
+        template = TEMPLATES[lang][0]
+        subtle_records = gen.generate_subtle_pairs_for_template(template, lang)
+
+        assert len(subtle_records) > 0
+        categories = {r.category for r in subtle_records}
+        expected_subtles = {
+            "silent_logic_drift",
+            "security_surface",
+            "concurrency_hazard",
+            "performance_regression",
+            "breaking_public_api",
+        }
+        assert expected_subtles.issubset(categories)
+
+        for r in subtle_records:
+            assert r.language == lang
+            assert r.source_type in ("mutation_subtle", "clean_commit", "synthetic")
+            if r.category in expected_subtles:
+                assert r.symbolic_gate_passed is True
+                assert r.label == 0
+                assert r.source_type == "mutation_subtle"
+                # Check that its primary taxonomy class is active
+                active_tax = [c for c, v in r.taxonomy_labels.items() if v >= 0.5]
+                assert len(active_tax) >= 1
+
+
+def test_git_commit_mining():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        # Initialize real git repository
+        subprocess.run(["git", "init"], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp), check=True, capture_output=True)
+
+        calc_file = tmp / "calc.py"
+        calc_file.write_text("def add(a: int, b: int) -> int:\n    return a + b\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial clean commit"], cwd=str(tmp), check=True, capture_output=True)
+
+        calc_file.write_text("def add(a: int, b: int) -> int:\n    # Hotfix logic\n    return a + b\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "fix: hotfix addition logic"], cwd=str(tmp), check=True, capture_output=True)
+
+        calc_file.write_text("def add(a: int, b: int) -> int:\n    return a - b\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Broken subtract change"], cwd=str(tmp), check=True, capture_output=True)
+
+        # Revert the broken commit
+        subprocess.run(["git", "revert", "--no-edit", "HEAD"], cwd=str(tmp), check=True, capture_output=True)
+
+        gen = DatasetGenerator(languages=["python"], seed=42)
+        mined_commits = gen.mine_git_history(tmp, max_samples=10)
+
+        assert len(mined_commits) > 0
+        source_types = {r.source_type for r in mined_commits}
+        # Verify mined real git sources
+        assert any(st in source_types for st in ("real_revert", "real_hotfix", "clean_commit"))
+        for r in mined_commits:
+            assert r.language == "python"
+            assert isinstance(r.input_dsl, str)
+            assert len(r.input_dsl) > 0
+            assert set(r.taxonomy_labels.keys()) == set(TAXONOMY_CLASSES)
+
+
+def test_taxonomy_leak_distinction():
+    """Verify ADR-0003 distinction: resource/memory leaks -> PerfRegression, concurrency leaks -> ConcurrencyHazard."""
+    rec_res = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py\n[GATE]\nSTATUS: APPROVED",
+        label=0,
+        risk_score=0.88,
+        category="resource_leak",
+        language="python",
+    )
+    assert rec_res.taxonomy_labels["PerformanceRegression"] > 0.8
+    assert rec_res.taxonomy_labels["ConcurrencyHazard"] == 0.0
+
+    rec_mem = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py\n[GATE]\nSTATUS: APPROVED",
+        label=0,
+        risk_score=0.88,
+        category="memory_leak",
+        language="python",
+    )
+    assert rec_mem.taxonomy_labels["PerformanceRegression"] > 0.8
+    assert rec_mem.taxonomy_labels["ConcurrencyHazard"] == 0.0
+
+    rec_conc = DatasetRecord(
+        input_dsl="[DIFF_TARGET] a.py\n[GATE]\nSTATUS: APPROVED",
+        label=0,
+        risk_score=0.88,
+        category="concurrency_leak",
+        language="python",
+    )
+    assert rec_conc.taxonomy_labels["ConcurrencyHazard"] > 0.8
+    assert rec_conc.taxonomy_labels["PerformanceRegression"] == 0.0
+
+
+def test_git_commit_word_boundaries():
+    """Ensure words like 'prefix', 'fixture', 'suffix' do not trigger false positive hotfixes or false clean exclusions."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        subprocess.run(["git", "init"], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp), check=True, capture_output=True)
+
+        f = tmp / "route.py"
+        f.write_text("def get_prefix(path: str) -> str:\n    return path\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: add prefix extraction support"], cwd=str(tmp), check=True, capture_output=True)
+
+        f.write_text("def get_prefix(path: str) -> str:\n    return path.strip()\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "test: update test fixtures and mocks"], cwd=str(tmp), check=True, capture_output=True)
+
+        gen = DatasetGenerator(languages=["python"], seed=42)
+        mined = gen.mine_git_history(tmp, max_samples=10)
+
+        # Neither commit should be falsely classified as real_hotfix
+        hotfixes = [r for r in mined if r.source_type == "real_hotfix"]
+        assert len(hotfixes) == 0
+
+        # The clean commit with 'prefix' must be recognized as clean_commit
+        cleans = [r for r in mined if r.source_type == "clean_commit"]
+        assert len(cleans) >= 1
+
+
+def test_cli_dataset_subtle_options():
+    """Verify that CLI flags for dataset generation (--include-subtle, --no-subtle, --filter-symbolic-gate) work cleanly."""
+    script_path = Path(__file__).resolve().parent.parent / "tools" / "dataset_generator.py"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        # Test with --filter-symbolic-gate
+        res = subprocess.run(
+            [sys.executable, str(script_path), "--output-dir", str(tmp), "--num-samples", "10", "--filter-symbolic-gate"],
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0
+        train_file = tmp / "dataset_train.jsonl"
+        assert train_file.exists()
+
+        # Verify all records have symbolic_gate_passed=True
+        with open(train_file, "r", encoding="utf-8") as f:
+            for line in f:
+                d = json.loads(line)
+                assert d["symbolic_gate_passed"] is True
+                assert "STATUS: APPROVED" in d["input_dsl"]
+
 

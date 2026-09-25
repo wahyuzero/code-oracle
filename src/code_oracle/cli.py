@@ -414,6 +414,7 @@ def cmd_dataset(args: argparse.Namespace) -> int:
         seed=args.seed,
         positive_label=args.positive_label,
         negative_label=args.negative_label,
+        filter_symbolic_gate=getattr(args, "filter_symbolic_gate", False),
     )
 
     out_dir = Path(args.output_dir)
@@ -422,6 +423,7 @@ def cmd_dataset(args: argparse.Namespace) -> int:
         num_samples=args.num_samples,
         val_ratio=args.val_ratio,
         repo_path=Path(args.repo) if args.repo else None,
+        include_subtle=getattr(args, "include_subtle", True),
     )
 
     if args.json:
@@ -610,6 +612,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_dataset.add_argument("--seed", type=int, default=42, help="Random seed")
     p_dataset.add_argument("--positive-label", type=int, default=1, help="Positive label (default: 1)")
     p_dataset.add_argument("--negative-label", type=int, default=0, help="Negative label (default: 0)")
+    p_dataset.add_argument("--filter-symbolic-gate", action="store_true", default=False, help="Filter out mutations that fail symbolic gate")
+    p_dataset.add_argument("--include-subtle", action="store_true", default=True, help="Include subtle gray-area semantic mutations across risk taxonomy")
+    p_dataset.add_argument("--no-subtle", dest="include_subtle", action="store_false", help="Disable subtle gray-area semantic mutations")
     p_dataset.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_dataset.set_defaults(func=cmd_dataset)
 

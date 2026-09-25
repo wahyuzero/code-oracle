@@ -29,6 +29,29 @@ VALID_CATEGORIES = {
     "keyword_changes",
     "circular_imports",
     "deleted_symbol",
+    # ADR-0003 multi-task risk taxonomy categories & subtle mutations
+    "breaking_public_api",
+    "security_surface",
+    "concurrency_hazard",
+    "performance_regression",
+    "silent_logic_drift",
+    "logic_drift",
+    "type_drift",
+    "resource_leak",
+    "concurrency_leak",
+    "side_effect",
+    # Mined commit types
+    "real_revert",
+    "real_hotfix",
+    "clean_commit",
+}
+
+VALID_TAXONOMY_CLASSES = {
+    "BreakingPublicAPI",
+    "SecuritySurface",
+    "ConcurrencyHazard",
+    "PerformanceRegression",
+    "SilentLogicDrift",
 }
 
 VALID_LANGUAGES = {"python", "typescript", "go", "rust"}
@@ -37,6 +60,7 @@ VALID_LANGUAGES = {"python", "typescript", "go", "rust"}
 def inspect_file(
     file_path: Path,
     max_token_limit: int = 400,
+    require_symbolic_gate: bool = False,
 ) -> Dict[str, Any]:
     """
     Inspect a single JSONL dataset file.
@@ -55,6 +79,9 @@ def inspect_file(
     labels_count: Dict[int, int] = {0: 0, 1: 0}
     languages_count: Dict[str, int] = {}
     categories_count: Dict[str, int] = {}
+    source_types_count: Dict[str, int] = {}
+    symbolic_gate_count: Dict[str, int] = {"passed": 0, "failed": 0}
+    taxonomy_activations: Dict[str, int] = {c: 0 for c in VALID_TAXONOMY_CLASSES}
     token_lengths: List[int] = []
 
     with open(file_path, "r", encoding="utf-8") as f:
@@ -107,7 +134,41 @@ def inspect_file(
             else:
                 languages_count[lang] = languages_count.get(lang, 0) + 1
 
-            # 6. Token Count Check
+            # 6. Multi-Task Metadata Check (ADR-0003)
+            if "taxonomy_labels" in record:
+                tax = record["taxonomy_labels"]
+                if not isinstance(tax, dict):
+                    violations.append(f"Line {idx}: taxonomy_labels must be a dict")
+                else:
+                    for k, v in tax.items():
+                        if k not in VALID_TAXONOMY_CLASSES:
+                            violations.append(f"Line {idx}: Unknown taxonomy class '{k}'")
+                        elif not isinstance(v, (int, float)) or not (0.0 <= v <= 1.0):
+                            violations.append(f"Line {idx}: Invalid taxonomy score {v} for '{k}'")
+                        elif v >= 0.5:
+                            taxonomy_activations[k] = taxonomy_activations.get(k, 0) + 1
+
+            if "symbolic_gate_passed" in record:
+                sg = record["symbolic_gate_passed"]
+                if not isinstance(sg, bool):
+                    violations.append(f"Line {idx}: symbolic_gate_passed must be a boolean (got {type(sg)})")
+                elif sg:
+                    symbolic_gate_count["passed"] += 1
+                else:
+                    symbolic_gate_count["failed"] += 1
+                    if require_symbolic_gate:
+                        violations.append(f"Line {idx}: Sample failed symbolic gate (require_symbolic_gate=True)")
+            elif require_symbolic_gate:
+                violations.append(f"Line {idx}: Missing symbolic_gate_passed key")
+
+            if "source_type" in record:
+                st = record["source_type"]
+                if not isinstance(st, str) or not st.strip():
+                    violations.append(f"Line {idx}: source_type must be a non-empty string")
+                else:
+                    source_types_count[st] = source_types_count.get(st, 0) + 1
+
+            # 7. Token Count Check
             dsl = record.get("input_dsl", "")
             if not isinstance(dsl, str) or not dsl.strip():
                 violations.append(f"Line {idx}: Empty or invalid input_dsl string")
@@ -145,6 +206,9 @@ def inspect_file(
         "labels": labels_count,
         "languages": languages_count,
         "categories": categories_count,
+        "source_types": source_types_count,
+        "symbolic_gate": symbolic_gate_count,
+        "taxonomy_activations": taxonomy_activations,
         "token_stats": token_stats,
         "violations": violations[:20],  # cap reporting violations
         "violations_count": len(violations),
@@ -180,7 +244,25 @@ def format_report_text(summary: Dict[str, Any]) -> str:
     lines.append("\nMutation Categories:")
     for cat in sorted(VALID_CATEGORIES):
         cnt = summary["categories"].get(cat, 0)
-        lines.append(f"  - {cat:<18}: {cnt:>6} ({cnt / tot * 100:.1f}%)")
+        if cnt > 0:
+            lines.append(f"  - {cat:<24}: {cnt:>6} ({cnt / tot * 100:.1f}%)")
+
+    # Symbolic Gate & Multi-Task Metadata (ADR-0003)
+    if summary.get("symbolic_gate") and any(summary["symbolic_gate"].values()):
+        lines.append("\nSymbolic Gate Status:")
+        sg = summary["symbolic_gate"]
+        lines.append(f"  - Gate Passed:     {sg.get('passed', 0):>6}")
+        lines.append(f"  - Gate Failed:     {sg.get('failed', 0):>6}")
+
+    if summary.get("source_types") and any(summary["source_types"].values()):
+        lines.append("\nSource Types Breakdown:")
+        for st, cnt in sorted(summary["source_types"].items()):
+            lines.append(f"  - {st:<24}: {cnt:>6} ({cnt / tot * 100:.1f}%)")
+
+    if summary.get("taxonomy_activations") and any(summary["taxonomy_activations"].values()):
+        lines.append("\nRisk Taxonomy Activations (prob >= 0.5):")
+        for cls_name, cnt in sorted(summary["taxonomy_activations"].items()):
+            lines.append(f"  - {cls_name:<24}: {cnt:>6} ({cnt / tot * 100:.1f}%)")
 
     # Token Metrics
     t = summary["token_stats"]
@@ -230,6 +312,12 @@ def main() -> int:
         help="Maximum allowed token length per sample (default: 400).",
     )
     parser.add_argument(
+        "--require-symbolic-gate",
+        action="store_true",
+        default=False,
+        help="Fail inspection if any sample did not pass symbolic gate.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit machine-readable JSON output.",
@@ -256,7 +344,11 @@ def main() -> int:
     summaries = []
 
     for fpath in files_to_inspect:
-        summary = inspect_file(fpath, max_token_limit=args.max_tokens)
+        summary = inspect_file(
+            fpath,
+            max_token_limit=args.max_tokens,
+            require_symbolic_gate=args.require_symbolic_gate,
+        )
         summaries.append(summary)
         if not summary.get("passed", False):
             overall_passed = False

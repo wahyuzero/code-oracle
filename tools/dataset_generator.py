@@ -70,6 +70,24 @@ def main() -> int:
         default=0,
         help="Integer label for negative (REJECT) instances.",
     )
+    parser.add_argument(
+        "--filter-symbolic-gate",
+        action="store_true",
+        default=False,
+        help="Filter out mutations that fail symbolic gate (keep only gray-area hard negatives).",
+    )
+    parser.add_argument(
+        "--include-subtle",
+        action="store_true",
+        default=True,
+        help="Include subtle gray-area semantic mutations across risk taxonomy.",
+    )
+    parser.add_argument(
+        "--no-subtle",
+        dest="include_subtle",
+        action="store_false",
+        help="Disable subtle gray-area semantic mutations.",
+    )
 
     args = parser.parse_args()
 
@@ -81,6 +99,7 @@ def main() -> int:
         seed=args.seed,
         positive_label=args.positive_label,
         negative_label=args.negative_label,
+        filter_symbolic_gate=args.filter_symbolic_gate,
     )
 
     print(f"[*] Generating dataset (target: {args.num_samples} samples, val_ratio: {args.val_ratio})...")
@@ -89,6 +108,7 @@ def main() -> int:
         num_samples=args.num_samples,
         val_ratio=args.val_ratio,
         repo_path=args.repo,
+        include_subtle=args.include_subtle,
     )
 
     print(f"[+] Dataset successfully generated at {args.output_dir}:")

@@ -109,9 +109,9 @@ def resolve_repo_spec(spec: str) -> Dict[str, str]:
     return {"language": "python", "name": repo_name, "url": url}
 
 
-def shallow_clone_repo(url: str, dest_dir: Path) -> Path:
+def shallow_clone_repo(url: str, dest_dir: Path, depth: int = 50) -> Path:
     """
-    Shallow-clone a git repository (--depth 1) into dest_dir if not already present.
+    Shallow-clone a git repository (--depth 50) into dest_dir if not already present.
     Returns the path to the cloned repository.
     """
     dest_dir = dest_dir.resolve()
@@ -120,8 +120,8 @@ def shallow_clone_repo(url: str, dest_dir: Path) -> Path:
         return dest_dir
 
     dest_dir.parent.mkdir(parents=True, exist_ok=True)
-    print(f"[*] Cloning {url} (shallow, --depth 1) into {dest_dir}...")
-    cmd = ["git", "clone", "--depth", "1", url, str(dest_dir)]
+    print(f"[*] Cloning {url} (shallow, --depth {depth}) into {dest_dir}...")
+    cmd = ["git", "clone", "--depth", str(depth), url, str(dest_dir)]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"Failed to clone {url}: {res.stderr.strip()}")
@@ -183,6 +183,7 @@ def mine_all_top_repos(
     seed: int = 42,
     custom_repos: Optional[List[Dict[str, str]]] = None,
     mined_samples_per_repo: int = 50,
+    filter_symbolic_gate: bool = False,
 ) -> Tuple[int, int]:
     """
     Main orchestration routine:
@@ -211,7 +212,7 @@ def mine_all_top_repos(
 
         try:
             repo_path = shallow_clone_repo(url, dest)
-            generator = DatasetGenerator(languages=[lang], seed=seed)
+            generator = DatasetGenerator(languages=[lang], seed=seed, filter_symbolic_gate=filter_symbolic_gate)
             print(f"[*] Mining {lang} repository ({name}) from {repo_path}...")
             mined = generator.mine_repository(repo_path, max_samples=per_repo_target)
             print(f"    [+] Extracted {len(mined)} raw samples from {name} ({lang})")
@@ -224,7 +225,7 @@ def mine_all_top_repos(
                     fallback_name = Path(fallback_url.rstrip("/")).stem.removesuffix(".git")
                     fb_dest = cache_dir / fallback_name
                     fb_path = shallow_clone_repo(fallback_url, fb_dest)
-                    fb_generator = DatasetGenerator(languages=[lang], seed=seed)
+                    fb_generator = DatasetGenerator(languages=[lang], seed=seed, filter_symbolic_gate=filter_symbolic_gate)
                     mined = fb_generator.mine_repository(fb_path, max_samples=per_repo_target)
                     print(f"    [+] Extracted {len(mined)} raw samples from fallback {fallback_name} ({lang})")
                     all_mined_records.extend(mined)
@@ -256,7 +257,7 @@ def mine_all_top_repos(
         needed_synth = max(0, (needed_pos + needed_neg) * 2)
 
         if needed_synth > 0:
-            synth_gen = DatasetGenerator(languages=[lang], seed=seed + 10)
+            synth_gen = DatasetGenerator(languages=[lang], seed=seed + 10, filter_symbolic_gate=filter_symbolic_gate)
             synth_records = synth_gen.generate_synthetic_dataset(num_samples=needed_synth)
             positives.extend([r for r in synth_records if r.label == 1 and r.language == lang])
             negatives.extend([r for r in synth_records if r.label == 0 and r.language == lang])
@@ -358,6 +359,12 @@ def main() -> int:
         default=150,
         help="Number of real-world samples to mine per cloned repository before synthetic balancing.",
     )
+    parser.add_argument(
+        "--filter-symbolic-gate",
+        action="store_true",
+        default=False,
+        help="Filter out mutations that fail symbolic gate (keep only gray-area hard negatives).",
+    )
 
     args = parser.parse_args()
 
@@ -378,6 +385,7 @@ def main() -> int:
         seed=args.seed,
         custom_repos=custom_repos,
         mined_samples_per_repo=args.mine_samples_per_repo,
+        filter_symbolic_gate=args.filter_symbolic_gate,
     )
 
     if train_n + val_n < 2000 or train_n + val_n > 4000:
