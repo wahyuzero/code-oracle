@@ -204,6 +204,30 @@ def cmd_clean(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dead_code(args: argparse.Namespace) -> int:
+    """Execute dead code and orphan symbol detection."""
+    from code_oracle.dead_code import detect_dead_code
+
+    ws = Path(args.workspace) if args.workspace else Path.cwd()
+    report = detect_dead_code(
+        workspace_root=ws,
+        paths=args.paths if args.paths else None,
+        min_lines=args.min_lines,
+        include_unexported=args.include_unexported,
+    )
+
+    fmt = "json" if getattr(args, "json", False) else args.format
+
+    if fmt == "json":
+        print(json.dumps(report.to_dict(), indent=2))
+    elif fmt == "text":
+        print(report.format_text())
+    else:  # "table"
+        print(report.format_table())
+
+    return 1 if report.dead_symbols_count > 0 else 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Launch the FastMCP server."""
     run_server()
@@ -418,6 +442,44 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument("workspace", nargs="?", default=".", help="Workspace root directory")
     p_clean.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_clean.set_defaults(func=cmd_clean)
+
+    # dead-code
+    p_dead = subparsers.add_parser(
+        "dead-code",
+        help="Detect unreachable and orphan symbols across workspace",
+    )
+    p_dead.add_argument(
+        "paths",
+        nargs="*",
+        default=[],
+        help="Optional target files or directories to filter report (default: workspace root)",
+    )
+    p_dead.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_dead.add_argument(
+        "--format",
+        "-f",
+        choices=["table", "json", "text"],
+        default="table",
+        help="Output format (table, json, text)",
+    )
+    p_dead.add_argument(
+        "--min-lines",
+        type=int,
+        default=0,
+        help="Minimum line count threshold for reporting dead code (default: 0)",
+    )
+    p_dead.add_argument(
+        "--include-unexported",
+        action="store_true",
+        default=False,
+        help="Include unexported (private) symbols in dead code detection",
+    )
+    p_dead.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON (alias for --format json)",
+    )
+    p_dead.set_defaults(func=cmd_dead_code)
 
     # serve
     p_serve = subparsers.add_parser("serve", help="Run the Lean FastMCP server")

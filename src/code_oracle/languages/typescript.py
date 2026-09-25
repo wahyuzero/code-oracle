@@ -252,6 +252,42 @@ def extract_typescript_imports(source: str, file_path: str = "") -> List[ImportR
                         )
                     )
 
+        elif node.type == "export_statement" and node.child_by_field_name("source"):
+            source_node = node.child_by_field_name("source")
+            mod_name = get_node_text(source_node, source_bytes).strip("'\"`") if source_node else ""
+            lineno = node.start_point.row + 1
+            has_star = any(ch.type == "*" for ch in node.children)
+            if has_star:
+                imports.append(
+                    ImportReference(
+                        module=mod_name,
+                        name="*",
+                        lineno=lineno,
+                        file_path=file_path,
+                    )
+                )
+            else:
+                for ch in node.children:
+                    if ch.type == "export_clause":
+                        for spec in ch.children:
+                            if spec.type == "export_specifier":
+                                name_node = spec.child_by_field_name("name") or (
+                                    spec.children[0] if spec.children else None
+                                )
+                                alias_node = spec.child_by_field_name("alias")
+                                if name_node:
+                                    imp_name = get_node_text(name_node, source_bytes)
+                                    asname = get_node_text(alias_node, source_bytes) if alias_node else None
+                                    imports.append(
+                                        ImportReference(
+                                            module=mod_name,
+                                            name=imp_name,
+                                            asname=asname,
+                                            lineno=lineno,
+                                            file_path=file_path,
+                                        )
+                                    )
+
         elif node.type == "call_expression":
             # const mod = require('./mod')
             fn = node.child_by_field_name("function")

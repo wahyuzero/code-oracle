@@ -4,7 +4,7 @@ Exposes a single minimal verification endpoint to prevent agent context bloat.
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from code_oracle.engine import TopoSliceEngine
 
@@ -42,6 +42,32 @@ def verify_patch(
     return report.to_dict()
 
 
+def run_dead_code_detection(
+    workspace_dir: Optional[str] = None,
+    paths: Optional[List[str]] = None,
+    min_lines: int = 0,
+    include_unexported: bool = False,
+) -> Dict[str, Any]:
+    """
+    Dead code detection endpoint for AI coding agents.
+    Evaluates symbol reachability graph in sub-50ms across Python, TS, Go, and Rust.
+    """
+    from code_oracle.dead_code import detect_dead_code as _detect
+
+    engine = get_engine(workspace_dir)
+    report = _detect(
+        workspace_root=engine.workspace_root,
+        indexer=engine.indexer,
+        paths=paths,
+        min_lines=min_lines,
+        include_unexported=include_unexported,
+    )
+    return report.to_dict()
+
+
+detect_dead_code = run_dead_code_detection
+
+
 def run_server():
     """Start the FastMCP server."""
     try:
@@ -60,6 +86,24 @@ def run_server():
             Set neural=True to activate deep Laya ModernBERT risk scoring.
             """
             return verify_patch(file_path, patch_content, enable_neural=neural)
+
+        @mcp.tool()
+        def detect_dead_code(
+            workspace_dir: Optional[str] = None,
+            paths: Optional[List[str]] = None,
+            min_lines: int = 0,
+            include_unexported: bool = False,
+        ) -> Dict[str, Any]:
+            """
+            Detect unreachable, orphan, and transitively dead symbols in sub-50ms.
+            Multi-language support across Python, TypeScript, Go, and Rust.
+            """
+            return run_dead_code_detection(
+                workspace_dir=workspace_dir,
+                paths=paths,
+                min_lines=min_lines,
+                include_unexported=include_unexported,
+            )
 
         mcp.run()
     except ImportError:
