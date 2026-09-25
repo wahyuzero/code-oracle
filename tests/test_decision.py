@@ -123,3 +123,29 @@ def test_engine_verify_populates_risk_score(tmp_path: Path):
     assert rep.status == "APPROVED"
     assert rep.risk_score == 0.05
     assert rep.to_dict()["risk_score"] == 0.05
+
+
+def test_engine_neural_toggle_env_and_config(tmp_path: Path, monkeypatch):
+    # Default without env or config
+    engine_default = TopoSliceEngine(workspace_root=tmp_path)
+    assert not engine_default.enable_neural
+    assert not engine_default.decision_head.is_neural_enabled
+
+    # Via environment variable
+    monkeypatch.setenv("CODE_ORACLE_NEURAL", "1")
+    engine_env = TopoSliceEngine(workspace_root=tmp_path)
+    assert engine_env.enable_neural
+
+    monkeypatch.delenv("CODE_ORACLE_NEURAL", raising=False)
+
+    # Via config file
+    config_dir = tmp_path / ".code_oracle"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text('{"neural": true}', encoding="utf-8")
+
+    engine_cfg = TopoSliceEngine(workspace_root=tmp_path)
+    assert engine_cfg.enable_neural
+
+    # Explicit override takes precedence over config
+    engine_override = TopoSliceEngine(workspace_root=tmp_path, enable_neural=False)
+    assert not engine_override.enable_neural

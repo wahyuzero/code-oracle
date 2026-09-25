@@ -42,11 +42,12 @@ class LayaDecisionHead:
     Provides sub-50ms local verification with calibrated risk scores.
     """
 
-    def __init__(self, weights_path: Optional[Path] = None):
-        self.weights_path = self._resolve_weights_path(weights_path)
+    def __init__(self, weights_path: Optional[Path] = None, enabled: bool = False):
+        self.enabled = enabled
+        self.weights_path = self._resolve_weights_path(weights_path) if enabled else None
         self.agent = None
         self._loaded = False
-        if self.weights_path and self.weights_path.exists():
+        if self.enabled and self.weights_path and self.weights_path.exists():
             self._try_load_model()
 
     def _resolve_weights_path(self, explicit_path: Optional[Path]) -> Optional[Path]:
@@ -67,9 +68,15 @@ class LayaDecisionHead:
 
     def _try_load_model(self) -> None:
         try:
+            import contextlib
+            import io
+            import warnings
             import laya
+
             logger.info(f"Loading fine-tuned Laya weights from {self.weights_path}")
-            self.agent = laya.load(str(self.weights_path))
+            with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                warnings.simplefilter("ignore")
+                self.agent = laya.load(str(self.weights_path))
             self._loaded = True
         except Exception as e:
             logger.warning(f"Could not load Laya model from {self.weights_path}: {e}")
@@ -100,12 +107,17 @@ class LayaDecisionHead:
         # If neural weights are available, run inference
         if self.is_neural_enabled:
             try:
-                res = self.agent.predict(linearized_dsl, VERIFICATION_QUESTIONS)
+                import contextlib
+                import io
+                import warnings
+                with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()):
+                    warnings.simplefilter("ignore")
+                    res = self.agent.predict(linearized_dsl, VERIFICATION_QUESTIONS)
                 status_ans = res["answers"]["status"]
                 risk_ans = res["answers"]["risk"]
 
                 pred_status = status_ans["choice"]
-                pred_confidence = float(status_ans["confidence"])
+                pred_confidence = max(symbolic_confidence, float(status_ans["confidence"]))
                 pred_risk = float(risk_ans["score"]) / 4.0  # Normalize 0..4 to 0.0..1.0
 
                 return pred_status, pred_confidence, pred_risk

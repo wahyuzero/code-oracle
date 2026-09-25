@@ -140,3 +140,57 @@ def test_cli_slice_command(cli_workspace):
     assert res.returncode == 0
     assert "[DIFF_TARGET]" in res.stdout
     assert "add" in res.stdout
+
+
+def test_cli_verify_no_neural_flag(cli_workspace):
+    patch = """@@ -1,2 +1,2 @@
+-def add(a: int) -> int:
++def add(a: int, b: int = 1) -> int:
+"""
+    res = subprocess.run(
+        [
+            "code-oracle",
+            "verify",
+            "calc.py",
+            "--patch",
+            patch,
+            "-w",
+            str(cli_workspace),
+            "--no-neural",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    data = json.loads(res.stdout)
+    assert data["status"] == "APPROVED"
+    assert data["risk_score"] == 0.05
+
+
+def test_cli_verify_neural_flag(cli_workspace):
+    patch = """@@ -1,2 +1,2 @@
+-def add(a: int) -> int:
++def add(a: int, b: int = 1) -> int:
+"""
+    res = subprocess.run(
+        [
+            "code-oracle",
+            "verify",
+            "calc.py",
+            "--patch",
+            patch,
+            "-w",
+            str(cli_workspace),
+            "--neural",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    data = json.loads(res.stdout)
+    assert data["status"] == "APPROVED"
+    assert "risk_score" in data
+    assert 0.0 <= data["risk_score"] <= 1.0
+

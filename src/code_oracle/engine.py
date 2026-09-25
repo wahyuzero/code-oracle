@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+import os
+from code_oracle.config import load_config
 from code_oracle.decision import LayaDecisionHead
 from code_oracle.indexer import WorkspaceIndexer
 from code_oracle.linearizer import linearize_subgraph
@@ -28,10 +30,23 @@ class TopoSliceEngine:
         self,
         workspace_root: Optional[Path] = None,
         weights_path: Optional[Path] = None,
+        enable_neural: Optional[bool] = None,
     ):
         self.workspace_root = Path(workspace_root or Path.cwd()).resolve()
         self.indexer = WorkspaceIndexer(workspace_root=self.workspace_root)
-        self.decision_head = LayaDecisionHead(weights_path=weights_path)
+
+        if enable_neural is None:
+            neural_env = os.environ.get("CODE_ORACLE_NEURAL", "").strip().lower()
+            if neural_env in ("1", "true", "yes"):
+                enable_neural = True
+            else:
+                cfg = load_config(self.workspace_root)
+                enable_neural = bool(cfg.get("neural", False))
+
+        self.enable_neural = bool(enable_neural)
+        self.decision_head = LayaDecisionHead(
+            weights_path=weights_path, enabled=self.enable_neural
+        )
 
     def verify(
         self,

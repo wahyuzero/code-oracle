@@ -36,9 +36,12 @@ def format_report_pretty(report_dict: dict) -> str:
     color_prefix = "\033[92m" if status == "APPROVED" else "\033[91m"
     color_reset = "\033[0m"
 
+    risk = report_dict.get("risk_score")
+    risk_str = f" | Risk Score: {risk:.4f}" if risk is not None else ""
+
     lines = [
         f"{color_prefix}===================================================={color_reset}",
-        f"{color_prefix} VERDICT: {status} (Confidence: {conf}) in {latency} ms{color_reset}",
+        f"{color_prefix} VERDICT: {status} (Confidence: {conf}{risk_str}) in {latency} ms{color_reset}",
         f"{color_prefix}===================================================={color_reset}",
     ]
 
@@ -87,7 +90,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print("Error: No patch content provided. Use --patch <file_or_diff> or pipe via stdin.", file=sys.stderr)
         return 2
 
-    engine = TopoSliceEngine(workspace_root=Path(args.workspace) if args.workspace else None)
+    engine = TopoSliceEngine(
+        workspace_root=Path(args.workspace) if args.workspace else None,
+        enable_neural=getattr(args, "neural", None),
+    )
     report = engine.verify(file_path=file_path, patch_content=patch_content, k=args.k)
     report_dict = report.to_dict()
 
@@ -375,6 +381,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_verify.add_argument("--patch", "-p", help="Patch diff string or path to diff file (use '-' for stdin)")
     p_verify.add_argument("--k", type=int, default=1, help="k-hop neighborhood radius (default: 1)")
     p_verify.add_argument("--workspace", "-w", help="Workspace root directory")
+    p_verify.add_argument(
+        "--neural",
+        dest="neural",
+        action="store_true",
+        default=None,
+        help="Enable Laya ModernBERT neural decision head and risk calibration",
+    )
+    p_verify.add_argument(
+        "--no-neural",
+        dest="neural",
+        action="store_false",
+        help="Disable Laya ModernBERT neural decision head (pure symbolic mode)",
+    )
     p_verify.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_verify.set_defaults(func=cmd_verify)
 
