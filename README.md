@@ -28,34 +28,29 @@ Instead of generating conversational critiques, Code Oracle constructs a localiz
 
 ### Verification Pipeline
 
-```
-    [ AI Coding Agent / LLM ]
-                │
-                │  (1) Proposes Patch / Refactor
-                ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │                         CODE ORACLE                         │
-  │                                                             │
-  │  [Stage 1: Tree-sitter Ingestion & k-Hop Subgraph Slicing]  │
-  │  - Parses structural syntax trees in < 8ms                  │
-  │  - Extracts callers, callees, and imported interfaces       │
-  │  - Isolates affected neighborhood (prevents graph explosion)│
-  │                             │                               │
-  │  [Stage 2: Deterministic Symbolic Gate]                     │
-  │  - Algorithmic cycle detection (Tarjan's SCC)               │
-  │  - Syntax validity & direct signature checks                │
-  │                             │                               │
-  │                             ▼ (Compact Subgraph State)      │
-  │  [Stage 3: Laya In-Memory Decision Head (421M)]             │
-  │  - Calibrated non-autoregressive probability evaluation     │
-  │  - 35ms latency | 0 output tokens generated                 │
-  └─────────────────────────────────────────────────────────────┘
-                │
-                │  (2) Structured Verdict (< 50ms)
-                ▼
-  "VERDICT: REJECT (Confidence: 0.94)
-   - Invariant Breach: Breaks caller contract in [billing_service.py]
-   - Topology Drift: Unhandled Optional[T] propagation"
+```mermaid
+flowchart TD
+    Agent["🤖 AI Coding Agent / Developer<br/>(Claude Code, Cursor, Antigravity)"]
+
+    subgraph Engine ["⚡ CODE ORACLE ENGINE (&lt; 50ms)"]
+        direction TD
+
+        Stage1["Stage 1: Tree-sitter &amp; k-Hop TopoSlice<br/>• Multi-language AST parsing (&lt; 8ms)<br/>• Extracts callers, callees &amp; interfaces<br/>• Isolates k-hop neighborhood graph"]
+
+        Stage2{"Stage 2: Deterministic Symbolic Gate<br/>Tarjan's SCC &amp; Contract Invariants"}
+
+        HardVeto["🚫 Hard Veto Early Exit (&lt; 25ms)<br/>Instant rejection on cycles &amp; signature drift"]
+
+        Stage3["🧠 Stage 3: Laya ModernBERT 421M Head<br/>• Evaluates linearized Micro-DSL subgraph<br/>• In-memory resident CPU inference<br/>• Calibrated continuous risk scoring (0.0 - 1.0)"]
+
+        Stage1 --> Stage2
+        Stage2 -- "Cycle / Invariant Breach" --> HardVeto
+        Stage2 -- "Topologically Valid" --> Stage3
+    end
+
+    Agent -->|"(1) Proposes Patch / Refactor"| Stage1
+    HardVeto -->|"(2) Fast-Fail Verdict"| Verdict["🎯 Structured Typed Verdict<br/>VERDICT: APPROVED / REJECTED<br/>Risk Score &amp; Invariant Telemetry"]
+    Stage3 -->|"(2) Calibrated Verdict"| Verdict
 ```
 
 ---
