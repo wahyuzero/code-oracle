@@ -156,6 +156,32 @@ def test_indexer_overlay_transient_symbols(temp_workspace):
     indexer.overlay_transient_symbols("service.py", [transient])
 
     assert indexer.get_definition("transient_func") is not None
-    # Disk should not be modified
     content = (temp_workspace / "service.py").read_text(encoding="utf-8")
     assert "transient_func" not in content
+
+
+def test_indexer_symbol_export_metadata_cache_roundtrip(temp_workspace):
+    """Verify Symbol.docstring, is_exported, and visibility survive cache serialization."""
+    indexer = WorkspaceIndexer(workspace_root=temp_workspace)
+    sym = Symbol(
+        name="exported_api_fn",
+        qualname="service.exported_api_fn",
+        file_path="service.py",
+        kind="function",
+        lineno=10,
+        end_lineno=15,
+        signature="def exported_api_fn(x: int) -> int",
+        docstring="Public service function.",
+        is_exported=True,
+        visibility="public",
+    )
+    serialized = indexer._serialize_symbol(sym)
+    assert serialized["docstring"] == "Public service function."
+    assert serialized["is_exported"] is True
+    assert serialized["visibility"] == "public"
+
+    deserialized = indexer._deserialize_symbol(serialized)
+    assert deserialized.docstring == "Public service function."
+    assert deserialized.is_exported is True
+    assert deserialized.visibility == "public"
+

@@ -148,7 +148,7 @@ class DeadCodeReport:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert report to dictionary."""
-        d = {
+        return {
             "workspace_root": self.workspace_root,
             "total_symbols_scanned": self.total_symbols_scanned,
             "dead_symbols_count": self.dead_symbols_count,
@@ -159,11 +159,9 @@ class DeadCodeReport:
             "scanned_files_count": self.scanned_files_count,
             "latency_ms": round(self.latency_ms, 2),
             "dead_symbols": [s.to_dict() for s in self.dead_symbols],
+            "suppressed_symbols_count": len(self.suppressed_symbols),
+            "suppressed_symbols": [s.to_dict() for s in self.suppressed_symbols],
         }
-        if self.suppressed_symbols:
-            d["suppressed_symbols_count"] = len(self.suppressed_symbols)
-            d["suppressed_symbols"] = [s.to_dict() for s in self.suppressed_symbols]
-        return d
 
     def format_table(self) -> str:
         """Format report into clean ASCII table."""

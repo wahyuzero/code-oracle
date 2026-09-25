@@ -88,15 +88,29 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
 
     # Check for module-level __all__
     all_names: Optional[Set[str]] = None
+
+    def _extract_all_elts(val_node: ast.AST) -> Set[str]:
+        if isinstance(val_node, (ast.List, ast.Tuple, ast.Set)):
+            return {
+                elt.value for elt in val_node.elts
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+            }
+        return set()
+
     for stmt in tree.body:
         if isinstance(stmt, ast.Assign):
             for target in stmt.targets:
                 if isinstance(target, ast.Name) and target.id == "__all__":
-                    if isinstance(stmt.value, (ast.List, ast.Tuple, ast.Set)):
-                        all_names = {
-                            elt.value for elt in stmt.value.elts
-                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
-                        }
+                    elts = _extract_all_elts(stmt.value)
+                    all_names = elts if all_names is None else (all_names | elts)
+        elif isinstance(stmt, ast.AnnAssign):
+            if isinstance(stmt.target, ast.Name) and stmt.target.id == "__all__" and stmt.value:
+                elts = _extract_all_elts(stmt.value)
+                all_names = elts if all_names is None else (all_names | elts)
+        elif isinstance(stmt, ast.AugAssign):
+            if isinstance(stmt.target, ast.Name) and stmt.target.id == "__all__":
+                elts = _extract_all_elts(stmt.value)
+                all_names = elts if all_names is None else (all_names | elts)
 
     def process_body(nodes: List[ast.stmt], parent_qualname: Optional[str] = None, is_parent_class: bool = False):
         for node in nodes:
@@ -210,7 +224,7 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
                 else:
                     if all_names is not None:
                         is_exported = node.name in all_names
-                        visibility = "public" if is_exported else ("private" if node.name.startswith("__") else ("internal" if node.name.startswith("_") else "public"))
+                        visibility = "public" if is_exported else ("private" if node.name.startswith("__") else "internal")
                     else:
                         if node.name.startswith("__") and not node.name.endswith("__"):
                             visibility = "private"
@@ -257,7 +271,7 @@ def extract_python_symbols(source: str, file_path: str = "") -> List[Symbol]:
                 docstring = ast.get_docstring(node)
                 if all_names is not None:
                     is_exported = node.name in all_names
-                    visibility = "public" if is_exported else ("private" if node.name.startswith("__") else ("internal" if node.name.startswith("_") else "public"))
+                    visibility = "public" if is_exported else ("private" if node.name.startswith("__") else "internal")
                 else:
                     if node.name.startswith("__") and not node.name.endswith("__"):
                         visibility = "private"

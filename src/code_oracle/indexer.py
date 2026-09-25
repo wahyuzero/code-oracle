@@ -246,6 +246,9 @@ class WorkspaceIndexer:
             "is_method": s.is_method,
             "is_static": s.is_static,
             "bases": s.bases,
+            "docstring": s.docstring,
+            "is_exported": s.is_exported,
+            "visibility": s.visibility,
             "params": [
                 {
                     "name": p.name,
@@ -323,6 +326,9 @@ class WorkspaceIndexer:
             is_method=d.get("is_method", False),
             is_static=d.get("is_static", False),
             bases=d.get("bases", []),
+            docstring=d.get("docstring"),
+            is_exported=d.get("is_exported", False),
+            visibility=d.get("visibility", "internal"),
         )
 
     def _remove_file_from_indices(self, file_path: str) -> None:

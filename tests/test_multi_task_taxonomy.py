@@ -263,3 +263,56 @@ def test_server_verify_patch_taxonomy_endpoint(tmp_path: Path):
     assert "risk_taxonomy" in res
     assert "epistemic_uncertainty" in res
     assert "active_risk_categories" in res
+
+
+def test_multitask_model_compute_loss_shape_resilience():
+    model = ModernBERTMultiTaskModel(hidden_size=768, num_taxonomy_classes=5)
+
+    # 1D risk_pred and 1D risk_target, with 2D log_variance (model output)
+    pred_1d = torch.tensor([0.2, 0.4])
+    target_1d = torch.tensor([0.0, 1.0])
+    logits = torch.randn(2, 5)
+    t_target = torch.zeros(2, 5, dtype=torch.long)  # test integer target casting
+    log_var_2d = torch.zeros(2, 1)
+
+    loss_dict = model.compute_loss(
+        risk_pred=pred_1d,
+        risk_target=target_1d,
+        taxonomy_logits=logits,
+        taxonomy_target=t_target,
+        log_variance=log_var_2d,
+        delta=0.1,
+    )
+
+    assert "loss_total" in loss_dict
+    assert "loss_risk" in loss_dict
+    # Mathematically exact Huber loss for [0.2, 0.0] and [0.4, 1.0] with delta=0.1 is 0.035
+    assert abs(loss_dict["loss_risk"].item() - 0.035) < 1e-5
+
+
+def test_multitask_model_homoscedastic_autograd():
+    model = ModernBERTMultiTaskModel(hidden_size=768, num_taxonomy_classes=5)
+
+    p1 = torch.nn.Parameter(torch.tensor(1.0))
+    p2 = torch.nn.Parameter(torch.tensor(1.0))
+    p3 = torch.nn.Parameter(torch.tensor(1.0))
+
+    pred = torch.tensor([[0.3], [0.7]])
+    target = torch.tensor([[0.0], [1.0]])
+    logits = torch.randn(2, 5)
+    t_target = torch.zeros(2, 5)
+    log_var = torch.zeros(2, 1)
+
+    loss_dict = model.compute_loss(
+        risk_pred=pred,
+        risk_target=target,
+        taxonomy_logits=logits,
+        taxonomy_target=t_target,
+        log_variance=log_var,
+        homoscedastic_weights=(p1, p2, p3),
+    )
+
+    loss_dict["loss_total"].backward()
+    assert p1.grad is not None and p2.grad is not None and p3.grad is not None
+    assert not torch.isnan(p1.grad) and not torch.isnan(p2.grad) and not torch.isnan(p3.grad)
+

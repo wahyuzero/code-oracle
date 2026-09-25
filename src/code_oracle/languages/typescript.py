@@ -332,6 +332,37 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
 
     symbols: List[Symbol] = []
 
+    # Collect exported names from export clauses, default exports, and CommonJS
+    exported_names: Set[str] = set()
+    for top_child in tree.root_node.children:
+        if top_child.type in ("export_statement", "export_default_statement"):
+            for sc in top_child.children:
+                if sc.type == "export_clause":
+                    for spec in sc.children:
+                        if spec.type == "export_specifier":
+                            name_node = spec.child_by_field_name("name") or (spec.children[0] if spec.children else None)
+                            if name_node:
+                                exported_names.add(get_node_text(name_node, source_bytes).strip())
+                elif sc.type == "identifier" and any(c.type == "default" for c in top_child.children):
+                    exported_names.add(get_node_text(sc, source_bytes).strip())
+        elif top_child.type == "expression_statement":
+            for expr in top_child.children:
+                if expr.type == "assignment_expression":
+                    left = expr.child_by_field_name("left")
+                    right = expr.child_by_field_name("right")
+                    if left and right:
+                        left_text = get_node_text(left, source_bytes).strip()
+                        if left_text == "module.exports" and right.type == "object":
+                            for obj_child in right.children:
+                                if obj_child.type in ("pair", "shorthand_property_identifier_pair"):
+                                    key_node = obj_child.child_by_field_name("key") or (obj_child.children[0] if obj_child.children else None)
+                                    if key_node:
+                                        exported_names.add(get_node_text(key_node, source_bytes).strip())
+                        elif left_text.startswith("exports."):
+                            prop = left_text.split(".", 1)[1].strip()
+                            if prop:
+                                exported_names.add(prop)
+
     def process_node(node: Node, parent_qualname: Optional[str] = None):
         # Unwrap export and ambient statements
         target_node = node
@@ -380,9 +411,16 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
         if target_node.type == "function_declaration":
             name_node = target_node.child_by_field_name("name")
             if not name_node:
-                return
-            fn_name = get_node_text(name_node, source_bytes)
+                if is_exported:
+                    fn_name = "default"
+                else:
+                    return
+            else:
+                fn_name = get_node_text(name_node, source_bytes)
             qualname = f"{parent_qualname}.{fn_name}" if parent_qualname else fn_name
+            if not is_exported and (fn_name in exported_names or qualname in exported_names):
+                is_exported = True
+                visibility = "public"
             sym_id = f"{file_path}::{qualname}"
 
             is_async = any(ch.type == "async" for ch in target_node.children)
@@ -508,9 +546,16 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
         elif target_node.type == "class_declaration":
             name_node = target_node.child_by_field_name("name")
             if not name_node:
-                return
-            class_name = get_node_text(name_node, source_bytes)
+                if is_exported:
+                    class_name = "default"
+                else:
+                    return
+            else:
+                class_name = get_node_text(name_node, source_bytes)
             qualname = f"{parent_qualname}.{class_name}" if parent_qualname else class_name
+            if not is_exported and (class_name in exported_names or qualname in exported_names):
+                is_exported = True
+                visibility = "public"
             sym_id = f"{file_path}::{qualname}"
 
             # Base classes & interfaces
@@ -698,6 +743,12 @@ def extract_typescript_symbols(source: str, file_path: str = "") -> List[Symbol]
 
     for child in tree.root_node.children:
         process_node(child)
+
+    # Post-process symbols that were exported via separate export clauses
+    for s in symbols:
+        if s.name in exported_names or s.qualname in exported_names:
+            s.is_exported = True
+            s.visibility = "public"
 
     # Extract module-level calls
     all_calls = _extract_calls(tree.root_node, source_bytes, caller_id=f"{file_path}::<module>")

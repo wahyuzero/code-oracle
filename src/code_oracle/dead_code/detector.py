@@ -19,14 +19,17 @@ from code_oracle.models import Symbol
 def is_symbol_exported(symbol: Symbol, detector: EntrypointDetector) -> bool:
     """
     Determine if a symbol is exported / public in its host language.
-    - Python: names without leading underscore (and not a nested inner function)
-    - Go: uppercase first letter
-    - Rust: pub visibility
-    - TypeScript: export keyword
+    Prioritizes AST-extracted symbol.is_exported and visibility metadata.
     """
     # Local nested inner functions are never exported
     if "." in symbol.qualname and not symbol.is_method:
         return False
+
+    if getattr(symbol, "is_exported", False):
+        return True
+
+    if getattr(symbol, "visibility", None) == "public":
+        return True
 
     ext = Path(symbol.file_path).suffix.lower()
 

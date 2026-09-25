@@ -165,11 +165,11 @@ class ModernBERTMultiTaskModel(nn.Module):
         - L_unc: Heteroscedastic negative log-likelihood:
                  0.5 * exp(-s) * (risk_target - risk_pred)^2 + 0.5 * s
         """
-        # Ensure shape alignment
-        if risk_pred.dim() > 1 and risk_target.dim() == 1:
-            risk_target = risk_target.unsqueeze(-1)
-        if log_variance.dim() > 1 and risk_target.dim() == 1:
-            risk_target = risk_target.unsqueeze(-1)
+        # Ensure robust element-wise alignment by reshaping 1D tensors to (B, 1)
+        risk_pred = risk_pred.view(-1, 1)
+        risk_target = risk_target.view(-1, 1).float()
+        log_variance = log_variance.view(-1, 1)
+        taxonomy_target = taxonomy_target.float()
 
         # 1. Continuous Risk Huber Loss
         l_risk = F.huber_loss(risk_pred, risk_target, delta=delta)
@@ -184,11 +184,14 @@ class ModernBERTMultiTaskModel(nn.Module):
         # Total combined loss
         if homoscedastic_weights is not None:
             s1, s2, s3 = homoscedastic_weights
+            t_s1 = s1 if isinstance(s1, torch.Tensor) else torch.tensor(float(s1), device=risk_pred.device)
+            t_s2 = s2 if isinstance(s2, torch.Tensor) else torch.tensor(float(s2), device=risk_pred.device)
+            t_s3 = s3 if isinstance(s3, torch.Tensor) else torch.tensor(float(s3), device=risk_pred.device)
             l_total = (
-                0.5 / (s1 ** 2) * l_risk
-                + 0.5 / (s2 ** 2) * l_tax
-                + 0.5 / (s3 ** 2) * l_unc
-                + torch.log(torch.tensor(s1 * s2 * s3, device=risk_pred.device))
+                0.5 / (t_s1 ** 2) * l_risk
+                + 0.5 / (t_s2 ** 2) * l_tax
+                + 0.5 / (t_s3 ** 2) * l_unc
+                + torch.log(torch.abs(t_s1 * t_s2 * t_s3) + 1e-8)
             )
         else:
             l_total = l_risk + l_tax + l_unc
@@ -224,7 +227,7 @@ class LayaDecisionHead:
         )
         self.weights_path = self._resolve_weights_path(weights_path) if enabled else None
         self.agent = None
-        self.multi_task_model: Optional[ModernBERTMultiTaskModel] = None
+        self.multi_task_model: ModernBERTMultiTaskModel = ModernBERTMultiTaskModel()
         self._loaded = False
         if self.enabled and self.weights_path and self.weights_path.exists():
             self._try_load_model()

@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
 
+import torch
+
 from code_oracle.dead_code.detector import DeadCodeDetector, detect_dead_code
 from code_oracle.dead_code.models import (
     DeadCodeReport,
@@ -17,8 +19,11 @@ from code_oracle.dead_code.models import (
 )
 from code_oracle.dead_code.semantics import (
     DeadCodeSemanticsClassifier,
+    DeadCodeSemanticsModel,
     vectorize_symbol,
 )
+from code_oracle.languages.python import extract_python_symbols
+from code_oracle.languages.typescript import extract_typescript_symbols
 from code_oracle.models import Symbol
 from code_oracle.server import run_dead_code_detection
 
@@ -331,3 +336,145 @@ def test_server_run_dead_code_detection(tmp_path: Path):
     assert "dead_symbols" in res
     assert "suppressed_symbols" in res
     assert any(s["name"] == "ExternalConfig" for s in res["suppressed_symbols"])
+
+
+def test_dead_code_semantics_model_forward():
+    model = DeadCodeSemanticsModel(hidden_size=768, num_classes=3)
+    model.eval()
+
+    h_pool = torch.randn(4, 768)
+    with torch.no_grad():
+        probs = model(h_pool)
+
+    assert probs.shape == (4, 3)
+    # Check probabilities are valid and sum to 1.0
+    assert (probs >= 0.0).all() and (probs <= 1.0).all()
+    assert torch.allclose(probs.sum(dim=-1), torch.ones(4), atol=1e-5)
+
+
+def test_stage1_pruner_excludes_test_files_and_internal_paths():
+    classifier = DeadCodeSemanticsClassifier(enabled=False)
+
+    # Test file should not be pruned as PUBLIC_API_SURFACE
+    test_sym = Symbol(
+        name="test_helper",
+        qualname="test_helper",
+        file_path="tests/test_calc.py",
+        kind="function",
+        lineno=10,
+        end_lineno=15,
+        is_exported=True,
+        visibility="public",
+    )
+    assert classifier.prune_stage1_public(test_sym) is None
+
+    # Go test file should not be pruned as PUBLIC_API_SURFACE
+    go_test_sym = Symbol(
+        name="TestHelper",
+        qualname="calc.TestHelper",
+        file_path="calc_test.go",
+        kind="function",
+        lineno=5,
+        end_lineno=10,
+        is_exported=True,
+        visibility="public",
+    )
+    assert classifier.prune_stage1_public(go_test_sym) is None
+
+    # Internal package should not be pruned as PUBLIC_API_SURFACE
+    internal_sym = Symbol(
+        name="InternalUtil",
+        qualname="helper.InternalUtil",
+        file_path="internal/helper/helper.go",
+        kind="function",
+        lineno=5,
+        end_lineno=10,
+        is_exported=True,
+        visibility="public",
+    )
+    assert classifier.prune_stage1_public(internal_sym) is None
+
+
+def test_stage1_pruner_excludes_cruft_keywords():
+    classifier = DeadCodeSemanticsClassifier(enabled=False)
+
+    # Function with 'deprecated' in name
+    cruft_sym1 = Symbol(
+        name="deprecated_calc",
+        qualname="calc.deprecated_calc",
+        file_path="fastapi/openapi/models.py",
+        kind="function",
+        lineno=10,
+        end_lineno=15,
+        is_exported=True,
+        visibility="public",
+    )
+    assert classifier.prune_stage1_public(cruft_sym1) is None
+
+    # Function with 'legacy' in docstring
+    cruft_sym2 = Symbol(
+        name="old_compute",
+        qualname="calc.old_compute",
+        file_path="fastapi/openapi/models.py",
+        kind="function",
+        lineno=20,
+        end_lineno=25,
+        docstring="legacy helper to be removed",
+        is_exported=True,
+        visibility="public",
+    )
+    assert classifier.prune_stage1_public(cruft_sym2) is None
+
+
+def test_typescript_export_clause_marked_public():
+    src = """
+function calculateTax(amount: number): number {
+    return amount * 0.15;
+}
+
+const TAX_RATE = 0.15;
+
+class TaxCalculator {}
+
+export { calculateTax, TAX_RATE };
+export default TaxCalculator;
+"""
+    syms = extract_typescript_symbols(src, "tax.ts")
+    sym_map = {s.name: s for s in syms if s.kind != "module"}
+
+    assert sym_map["calculateTax"].is_exported is True
+    assert sym_map["calculateTax"].visibility == "public"
+
+    assert sym_map["TAX_RATE"].is_exported is True
+    assert sym_map["TAX_RATE"].visibility == "public"
+
+    assert sym_map["TaxCalculator"].is_exported is True
+    assert sym_map["TaxCalculator"].visibility == "public"
+
+
+def test_python_annotated_all_and_augassign():
+    src = """
+__all__: list[str] = ["public_func"]
+__all__ += ("public_class",)
+
+def public_func():
+    return 1
+
+def unexported_helper():
+    return 2
+
+class public_class:
+    pass
+"""
+    syms = extract_python_symbols(src, "pkg.py")
+    sym_map = {s.name: s for s in syms if s.kind != "module"}
+
+    assert sym_map["public_func"].is_exported is True
+    assert sym_map["public_func"].visibility == "public"
+
+    assert sym_map["public_class"].is_exported is True
+    assert sym_map["public_class"].visibility == "public"
+
+    assert sym_map["unexported_helper"].is_exported is False
+    assert sym_map["unexported_helper"].visibility in ("internal", "private")
+

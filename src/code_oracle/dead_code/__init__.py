@@ -10,7 +10,11 @@ from code_oracle.dead_code.models import (
     SemanticClassification,
     SemanticDeadSymbol,
 )
-from code_oracle.dead_code.semantics import DeadCodeSemanticsClassifier
+from code_oracle.dead_code.semantics import (
+    DeadCodeSemanticsClassifier,
+    DeadCodeSemanticsModel,
+    vectorize_symbol,
+)
 
 __all__ = [
     "DeadCodeDetector",
@@ -20,6 +24,8 @@ __all__ = [
     "SemanticClassification",
     "SemanticDeadSymbol",
     "DeadCodeSemanticsClassifier",
+    "DeadCodeSemanticsModel",
+    "vectorize_symbol",
     "EntrypointDetector",
     "is_entrypoint",
 ]

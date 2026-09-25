@@ -13,6 +13,10 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 from code_oracle.dead_code.models import DeadSymbol, SemanticClassification, SemanticDeadSymbol
 from code_oracle.models import Symbol
 
@@ -72,6 +76,25 @@ CRUFT_KEYWORDS: Set[str] = {
 }
 
 
+def is_test_or_internal_path(file_path: str) -> bool:
+    """Check if file path belongs to a test suite or internal/private module."""
+    clean = file_path.replace("\\", "/").lower()
+    parts = clean.split("/")
+
+    # Directory checks
+    if any(p in ("tests", "test", "__tests__", "spec", "internal", "private") for p in parts):
+        return True
+
+    # Filename checks
+    file_name = parts[-1]
+    if file_name.startswith("test_") or file_name.endswith(("_test.py", "_test.go", "_test.rs")):
+        return True
+    if file_name.endswith((".spec.ts", ".test.ts", ".spec.tsx", ".test.tsx", ".spec.js", ".test.js")):
+        return True
+
+    return False
+
+
 def vectorize_symbol(symbol: Symbol) -> str:
     """
     Convert candidate dead symbol into compact representation:
@@ -95,6 +118,37 @@ def vectorize_symbol(symbol: Symbol) -> str:
     )
 
 
+class DeadCodeSemanticsModel(nn.Module):
+    """
+    Stage 2 Neural Classifier Head over ModernBERT representations.
+    Maps pooled representation h_pool in R^hidden_size (default 768) to 3-class distribution:
+    - Index 0: PUBLIC_API_SURFACE
+    - Index 1: INTERNAL_ORPHAN
+    - Index 2: GENUINE_CRUFT
+    """
+    CLASSES = [
+        SemanticClassification.PUBLIC_API_SURFACE,
+        SemanticClassification.INTERNAL_ORPHAN,
+        SemanticClassification.GENUINE_CRUFT,
+    ]
+
+    def __init__(self, hidden_size: int = 768, num_classes: int = 3):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_classes = num_classes
+        self.classifier = nn.Sequential(
+            nn.Linear(hidden_size, 128),
+            nn.GELU(),
+            nn.LayerNorm(128),
+            nn.Linear(128, num_classes),
+        )
+
+    def forward(self, h_pool: torch.Tensor) -> torch.Tensor:
+        """Forward pass returning softmax probability distribution (B, 3)."""
+        logits = self.classifier(h_pool)
+        return F.softmax(logits, dim=-1)
+
+
 class DeadCodeSemanticsClassifier:
     """
     Two-Stage Dead Code Semantics Classifier.
@@ -108,7 +162,7 @@ class DeadCodeSemanticsClassifier:
     ):
         self.enabled = enabled
         self.weights_path = Path(weights_path).resolve() if weights_path else None
-        self._model = None
+        self.model: Optional[DeadCodeSemanticsModel] = None
         self._tokenizer = None
         self._loaded = False
 
@@ -131,7 +185,7 @@ class DeadCodeSemanticsClassifier:
                         break
 
             if self.weights_path and self.weights_path.exists():
-                # Neural weights present
+                self.model = DeadCodeSemanticsModel()
                 self._loaded = True
         except Exception as e:
             logger.debug("Semantic classifier neural weights not loaded: %s", e)
@@ -148,6 +202,16 @@ class DeadCodeSemanticsClassifier:
         Resolves 80-90% of library symbols deterministically.
         Returns SemanticDeadSymbol if definitely PUBLIC_API_SURFACE, otherwise None.
         """
+        # Test files and internal/private packages are never public library API surfaces
+        if is_test_or_internal_path(symbol.file_path):
+            return None
+
+        # Symbols containing cruft indicators are never public library surfaces
+        name_lower = symbol.name.lower()
+        doc_lower = (symbol.docstring or "").lower()
+        if any(k in name_lower or k in doc_lower for k in CRUFT_KEYWORDS):
+            return None
+
         ext = Path(symbol.file_path).suffix.lower()
         file_norm = symbol.file_path.replace("\\", "/").lower()
 
@@ -194,11 +258,6 @@ class DeadCodeSemanticsClassifier:
                 elif symbol.docstring:
                     is_public = True
                     reason = "Python exported symbol with documented public interface"
-                elif not symbol.name.startswith("_") and not symbol.is_method:
-                    # Top-level public function or class in package
-                    if not file_norm.endswith("main.py") and not file_norm.endswith("test.py"):
-                        is_public = True
-                        reason = "Python module-level public symbol without leading underscore"
 
         if is_public:
             return SemanticDeadSymbol(
@@ -234,7 +293,9 @@ class DeadCodeSemanticsClassifier:
         """
         Stage 2: Packed Neural / Heuristic Semantic Classifier.
         Evaluates ambiguous candidate symbols that survived Stage 1.
+        Vectorizes symbol representation via vectorize_symbol().
         """
+        vectorized_text = vectorize_symbol(symbol)
         name_lower = symbol.name.lower()
         doc_lower = (symbol.docstring or "").lower()
 
@@ -248,9 +309,9 @@ class DeadCodeSemanticsClassifier:
                 "INTERNAL_ORPHAN": 0.08,
                 "GENUINE_CRUFT": 0.90,
             }
-            reason = f"Genuine cruft / obsolete code: matches cruft keyword in signature or docstring"
+            reason = "Genuine cruft / obsolete code: matches cruft keyword in signature or docstring"
             suppressed = False
-        elif symbol.is_exported:
+        elif symbol.is_exported and not is_test_or_internal_path(symbol.file_path):
             # Exported but not caught by Stage 1
             classification = SemanticClassification.PUBLIC_API_SURFACE
             calibrated_confidence = 0.10
@@ -259,7 +320,7 @@ class DeadCodeSemanticsClassifier:
                 "INTERNAL_ORPHAN": 0.10,
                 "GENUINE_CRUFT": 0.05,
             }
-            reason = f"Semantic classifier: exported library surface candidate"
+            reason = "Semantic classifier: exported library surface candidate"
             suppressed = True
         else:
             # Internal orphan
