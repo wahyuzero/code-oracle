@@ -114,6 +114,7 @@ Code Oracle automatically downloads and caches these weights to `~/.cache/code_o
 - [ ] Official Git Tagging & GitHub Release pipeline (`v0.1.0`)
 - [ ] Python Package Wheel Distribution & PyPI Publishing (`pip install code-oracle`)
 - [ ] Multi-Agent Ecosystem Integrations (Claude Code, Cursor, Antigravity, OpenCode, and Cline sidecars)
+- [ ] *(Maybe / Experimental)* Synthetic User & Local Load Simulation Plugin (AST endpoint discovery + lightweight concurrent stress tester)
 
 ---
 
