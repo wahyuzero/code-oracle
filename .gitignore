@@ -33,10 +33,30 @@ venv.bak/
 
 # Model checkpoints and weights (Frugal/Offline)
 *.bin
+*.pt
+*.pth
+*.ckpt
 *.onnx
 *.safetensors
 models/
 weights/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Logs & Diagnostics
+*.log
+*.prof
 
 # IDE & OS
 .vscode/
@@ -46,11 +66,15 @@ weights/
 .DS_Store
 Thumbs.db
 
+# Dependencies (Multi-lang AST)
+node_modules/
+
 # Code Oracle Cache
 .code_oracle/
 
 # Knowledge Graph
 graphify-out/
+.graphify/
 
 # Mined Raw Repositories & Temporary Outputs
 mined_repos/
@@ -62,6 +86,12 @@ dataset_output/
 !data/*.jsonl
 !data/*.zip
 
-# Large Model Archives
+# Large Archives & Compression
 *.zip
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.7z
 !data/code_oracle_dataset.zip
+
