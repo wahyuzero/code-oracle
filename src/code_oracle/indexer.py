@@ -638,20 +638,32 @@ class WorkspaceIndexer:
 
         # 2. Self or cls call inside a class
         if callee.startswith(("self.", "cls.")) and caller_sym:
-            attr = callee.split(".", 1)[1]
-            if caller_sym.qualname and "." in caller_sym.qualname:
-                cls_qualname = caller_sym.qualname.rsplit(".", 1)[0]
-                full_id = f"{caller_sym.file_path}::{cls_qualname}.{attr}"
-                if full_id in self._definitions:
-                    return self._definitions[full_id]
-                matches = self._name_to_symbols.get(f"{cls_qualname}.{attr}", [])
+            parts = callee.split(".")
+            if len(parts) == 2:
+                attr = parts[1]
+                if caller_sym.qualname and "." in caller_sym.qualname:
+                    cls_qualname = caller_sym.qualname.rsplit(".", 1)[0]
+                    full_id = f"{caller_sym.file_path}::{cls_qualname}.{attr}"
+                    if full_id in self._definitions:
+                        return self._definitions[full_id]
+                    matches = self._name_to_symbols.get(f"{cls_qualname}.{attr}", [])
+                    if matches:
+                        return matches[0]
+
+                same_file = f"{caller_sym.file_path}::{attr}"
+                if same_file in self._definitions:
+                    return self._definitions[same_file]
+                return self.get_definition(attr)
+            else:
+                # Chained call on attribute of self (e.g. self.indexer.restore_transient_symbols)
+                attr = parts[-1]
+                same_file = f"{caller_sym.file_path}::{attr}"
+                if same_file in self._definitions:
+                    return self._definitions[same_file]
+                matches = self.get_symbols_by_name(attr)
                 if matches:
                     return matches[0]
-
-            same_file = f"{caller_sym.file_path}::{attr}"
-            if same_file in self._definitions:
-                return self._definitions[same_file]
-            return self.get_definition(attr)
+                return self.get_definition(attr)
 
         # 3. Dotted or scoped callee: ClassName.method, mod.func, or mod::func
         if "." in callee or "::" in callee:
@@ -683,6 +695,22 @@ class WorkspaceIndexer:
 
         # 4. Plain name call
         if caller_sym:
+            # Check nested/local function under caller's qualname
+            nested_id = f"{caller_sym.file_path}::{caller_sym.qualname}.{callee}"
+            if nested_id in self._definitions:
+                return self._definitions[nested_id]
+
+            # Check sibling under parent qualname (if caller is itself nested or a method)
+            if "." in caller_sym.qualname:
+                parent_prefix = caller_sym.qualname.rsplit(".", 1)[0]
+                sibling_id = f"{caller_sym.file_path}::{parent_prefix}.{callee}"
+                if sibling_id in self._definitions:
+                    return self._definitions[sibling_id]
+
+            # Check self-recursive call if callee == caller's short name
+            if callee == caller_sym.name and caller_sym.id in self._definitions:
+                return caller_sym
+
             same_file = f"{caller_sym.file_path}::{callee}"
             if same_file in self._definitions:
                 return self._definitions[same_file]

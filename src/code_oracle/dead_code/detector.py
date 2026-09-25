@@ -18,11 +18,15 @@ from code_oracle.models import Symbol
 def is_symbol_exported(symbol: Symbol, detector: EntrypointDetector) -> bool:
     """
     Determine if a symbol is exported / public in its host language.
-    - Python: names without leading underscore
+    - Python: names without leading underscore (and not a nested inner function)
     - Go: uppercase first letter
     - Rust: pub visibility
     - TypeScript: export keyword
     """
+    # Local nested inner functions are never exported
+    if "." in symbol.qualname and not symbol.is_method:
+        return False
+
     ext = Path(symbol.file_path).suffix.lower()
 
     if ext == ".py":
@@ -67,18 +71,23 @@ class DeadCodeDetector:
 
     def _matches_paths(self, file_path: str, filter_paths: List[str]) -> bool:
         """Check if symbol file path matches any requested filter path."""
-        norm_file = file_path.replace("\\", "/").lstrip("./")
+        norm_file = file_path.replace("\\", "/")
+        if norm_file.startswith("./"):
+            norm_file = norm_file[2:]
 
         for p in filter_paths:
-            # Normalize candidate filter path
+            p_str = str(p).replace("\\", "/")
+            if p_str.startswith("./"):
+                p_str = p_str[2:]
+
             p_obj = Path(p)
             if p_obj.is_absolute():
                 try:
                     norm_p = str(p_obj.resolve().relative_to(self.workspace_root)).replace("\\", "/")
                 except ValueError:
-                    norm_p = str(p).replace("\\", "/")
+                    norm_p = p_str
             else:
-                norm_p = str(p).replace("\\", "/").lstrip("./")
+                norm_p = p_str
 
             if norm_file == norm_p:
                 return True
@@ -165,7 +174,7 @@ class DeadCodeDetector:
                                     if file_sym.name == imp.name:
                                         roots.add(file_sym.id)
 
-        # 3. Build directed reference edges
+        # 3. Build directed reference edges using WorkspaceIndex definitions, callers, and importers
         for sym in all_symbols:
             # Call edges
             for call in sym.calls:
@@ -173,6 +182,15 @@ class DeadCodeDetector:
                 if callee_sym and callee_sym.id in self.indexer._definitions:
                     forward_graph[sym.id].add(callee_sym.id)
                     reverse_graph[callee_sym.id].add(sym.id)
+
+                # For polymorphic / dynamic method calls (e.g. obj.method()),
+                # link candidate methods with the same name across definitions
+                if "." in call.callee:
+                    method_name = call.callee.split(".")[-1].split("::")[-1]
+                    for candidate in self.indexer.get_symbols_by_name(method_name):
+                        if candidate.kind in ("method", "function") and candidate.id in self.indexer._definitions:
+                            forward_graph[sym.id].add(candidate.id)
+                            reverse_graph[candidate.id].add(sym.id)
 
             # Class inheritance and constructor edges
             if sym.kind == "class":
@@ -186,6 +204,26 @@ class DeadCodeDetector:
                     if base_sym and base_sym.id in self.indexer._definitions:
                         forward_graph[sym.id].add(base_sym.id)
                         reverse_graph[base_sym.id].add(sym.id)
+
+        # Incorporate indexer._callers into graph topology
+        for target_name, callers in self.indexer._callers.items():
+            target_syms = self.indexer.get_symbols_by_name(target_name)
+            for c_ref in callers:
+                if c_ref.caller and c_ref.caller in self.indexer._definitions:
+                    for t_sym in target_syms:
+                        if t_sym.id in self.indexer._definitions:
+                            forward_graph[c_ref.caller].add(t_sym.id)
+                            reverse_graph[t_sym.id].add(c_ref.caller)
+
+        # Incorporate indexer._importers for root export propagation
+        for target_name, importers in self.indexer._importers.items():
+            target_syms = self.indexer.get_symbols_by_name(target_name)
+            for imp_ref in importers:
+                if self.entrypoint_detector.is_root_export(
+                    Symbol(name="", qualname="", file_path=imp_ref.file_path, kind="module", lineno=1, end_lineno=1)
+                ):
+                    for t_sym in target_syms:
+                        roots.add(t_sym.id)
 
         # 4. Forward reachability traversal (BFS from roots)
         reachable: Set[str] = set(roots)
@@ -209,8 +247,11 @@ class DeadCodeDetector:
             if sym.id in reachable:
                 continue
 
-            # Exemption: dunder/magic methods on an ALIVE class are not dead
-            if self.entrypoint_detector.is_magic_method(sym) and sym.is_method:
+            # Exemption: dunder/magic methods and properties on an ALIVE class are not dead
+            if (
+                self.entrypoint_detector.is_magic_method(sym)
+                or self.entrypoint_detector.is_property_method(sym)
+            ) and sym.is_method:
                 parent_qualname = sym.qualname.rsplit(".", 1)[0] if "." in sym.qualname else ""
                 class_id = f"{sym.file_path}::{parent_qualname}"
                 if class_id in reachable:

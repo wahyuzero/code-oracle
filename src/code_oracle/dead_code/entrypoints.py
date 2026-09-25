@@ -17,11 +17,11 @@ from code_oracle.models import Symbol
 
 # Regex patterns for route and framework decorators
 ROUTE_DECORATOR_PATTERN = re.compile(
-    r"@\s*(?:[\w\.]+\.)?(?:app|router|bp|api|server|web)\s*\.\s*(?:get|post|put|delete|patch|options|head|route|websocket)\b",
+    r"@\s*(?:(?:[\w\.]+\.)?(?:app|router|bp|api|server|web)\s*\.\s*(?:get|post|put|delete|patch|options|head|route|websocket)|(?:Get|Post|Put|Delete|Patch|Controller|Route)\b)",
     re.IGNORECASE,
 )
 CLI_DECORATOR_PATTERN = re.compile(
-    r"@\s*(?:[\w\.]+\.)?(?:click|typer|app|cli)\s*\.\s*(?:command|group|option|argument)\b",
+    r"@\s*(?:[\w\.]+\.)?(?:click|typer|app|cli|main)\s*\.\s*(?:command|group|option|argument)\b",
     re.IGNORECASE,
 )
 TEST_DECORATOR_PATTERN = re.compile(
@@ -79,29 +79,10 @@ class EntrypointDetector:
 
         return False
 
-    def is_test_symbol(self, symbol: Symbol) -> bool:
-        """Check if symbol represents a test function, benchmark, or test suite."""
-        if self.is_test_file(symbol.file_path):
-            return True
-
-        name = symbol.name
-        # Python / JS / Rust test naming
-        if name.startswith("test_") or (name.startswith("Test") and symbol.kind in ("class", "function")):
-            return True
-
-        # Go test naming
-        if symbol.file_path.endswith(".go"):
-            if name.startswith(("Test", "Benchmark", "Fuzz", "Example")):
-                return True
-
-        # Pytest fixture or Rust #[test] check in decorator/calls
-        if any(c.callee.endswith(("fixture", "pytest.fixture")) for c in symbol.calls):
-            return True
-
     def get_symbol_decorators(self, symbol: Symbol) -> List[str]:
         """
-        Scan lines immediately preceding the symbol's lineno for decorators.
-        Stops when encountering a non-decorator/non-blank statement.
+        Scan lines preceding the symbol's lineno for decorators.
+        Robustly handles multi-line decorator blocks and comments.
         """
         lines = self.get_source_lines(symbol.file_path)
         if not lines or symbol.lineno < 1 or symbol.lineno > len(lines):
@@ -109,17 +90,52 @@ class EntrypointDetector:
 
         decorators: List[str] = []
         idx = symbol.lineno - 2  # 0-indexed line immediately above symbol
+        accum: List[str] = []
+        paren_depth = 0
+        bracket_depth = 0
+
         while idx >= 0:
             line = lines[idx].strip()
-            if not line or line.startswith("#") or line.startswith("//"):
+            if not line:
+                if not accum:
+                    idx -= 1
+                    continue
+                else:
+                    accum.append(line)
+                    idx -= 1
+                    continue
+
+            # Standalone comments between decorators
+            if not accum and (line.startswith("#") or line.startswith("//")):
                 idx -= 1
                 continue
+
+            open_parens = line.count("(")
+            close_parens = line.count(")")
+            open_brackets = line.count("[")
+            close_brackets = line.count("]")
+
+            paren_depth += (close_parens - open_parens)
+            bracket_depth += (close_brackets - open_brackets)
+
+            accum.append(line)
+
+            # Check if this line is the beginning of a decorator (@ or #[)
             if line.startswith("@") or line.startswith("#["):
-                decorators.append(line)
+                if paren_depth <= 0 and bracket_depth <= 0:
+                    dec_text = "\n".join(reversed(accum)).strip()
+                    decorators.append(dec_text)
+                    accum = []
+                    paren_depth = 0
+                    bracket_depth = 0
                 idx -= 1
                 continue
-            # Encountered non-decorator statement - decorator block has ended
-            break
+
+            # If not inside a decorator call and line is not a decorator header, decorator block ended
+            if paren_depth <= 0 and bracket_depth <= 0:
+                break
+
+            idx -= 1
 
         return decorators
 
@@ -149,10 +165,23 @@ class EntrypointDetector:
 
         return False
 
+    def is_property_method(self, symbol: Symbol) -> bool:
+        """Check if symbol is decorated with @property, @cached_property, @setter, etc."""
+        if not symbol.is_method:
+            return False
+        decorators = self.get_symbol_decorators(symbol)
+        for dec in decorators:
+            clean = dec.lower()
+            if any(p in clean for p in ("@property", "@cached_property", ".setter", ".deleter", "@abstractmethod", "@overload")):
+                return True
+        return False
+
     def is_cli_symbol(self, symbol: Symbol) -> bool:
         """Check if symbol is a CLI command or program entrypoint."""
         name = symbol.name
         clean_file = symbol.file_path.replace("\\", "/").lower()
+        parts = clean_file.split("/")
+        filename = parts[-1]
 
         # Standalone main/cli functions
         if name in ("main", "cli", "run_cli", "app"):
@@ -164,15 +193,22 @@ class EntrypointDetector:
         if symbol.file_path.endswith(".go") and name == "init":
             return True
 
-        # Known CLI files
-        parts = clean_file.split("/")
-        if parts[-1] in ("cli.py", "main.py", "__main__.py", "main.go", "main.rs"):
-            if name in ("main", "cli", "run", "execute", "start"):
+        # Known CLI files or CLI command naming conventions
+        if filename in ("cli.py", "main.py", "__main__.py", "main.go", "main.rs", "commands.py", "cmd.py"):
+            if (
+                name in ("main", "cli", "run", "execute", "start")
+                or name.startswith(("cmd_", "do_"))
+                or name.endswith(("_command", "_cmd"))
+            ):
                 return True
 
-        # Click / Typer decorators in calls
+        # General CLI command naming convention across any file
+        if name.startswith("cmd_") and symbol.kind in ("function", "async_function"):
+            return True
+
+        # Click / Typer / CLI decorators in calls
         for c in symbol.calls:
-            if any(kw in c.callee for kw in ("click.command", "click.group", "app.command", "cli.command")):
+            if any(kw in c.callee for kw in ("click.command", "click.group", "app.command", "cli.command", "typer.command")):
                 return True
 
         # Inspect source lines for @click or @app.command

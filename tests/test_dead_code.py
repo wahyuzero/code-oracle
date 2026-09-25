@@ -649,3 +649,256 @@ def dead_worker():
     assert result["dead_symbols_count"] == 1
     assert result["dead_symbols"][0]["name"] == "dead_worker"
     assert result["latency_ms"] < 50.0
+
+
+# ============================================================================
+# Advanced Edge Case & Robustness Tests
+# ============================================================================
+
+def test_multiline_route_and_cli_decorators(tmp_path):
+    """Verify multi-line route and CLI decorators are parsed accurately without truncation."""
+    (tmp_path / "api.py").write_text(
+        """from fastapi import FastAPI
+import click
+
+app = FastAPI()
+
+@app.get(
+    "/v1/users",
+    tags=["users"],
+)
+def get_users_route():
+    return helper()
+
+@click.command(
+    name="backup",
+    help="Run system backup",
+)
+def run_backup_cli():
+    return helper()
+
+def helper():
+    return "ok"
+
+def dead_unreferenced():
+    return "dead"
+""",
+        encoding="utf-8",
+    )
+
+    report = detect_dead_code(workspace_root=tmp_path)
+    dead_names = [s.name for s in report.dead_symbols]
+
+    assert "dead_unreferenced" in dead_names
+    assert "get_users_route" not in dead_names
+    assert "run_backup_cli" not in dead_names
+    assert "helper" not in dead_names
+
+
+def test_cli_cmd_prefix_and_dispatch_patterns(tmp_path):
+    """Verify CLI subcommand functions (cmd_*) in CLI modules are treated as entrypoint roots."""
+    (tmp_path / "cli.py").write_text(
+        """def cmd_build(args):
+    return do_build()
+
+def cmd_deploy(args):
+    return 1
+
+def do_build():
+    return "built"
+
+def dead_abandoned():
+    return None
+""",
+        encoding="utf-8",
+    )
+
+    report = detect_dead_code(workspace_root=tmp_path)
+    dead_names = [s.name for s in report.dead_symbols]
+
+    assert "dead_abandoned" in dead_names
+    assert "cmd_build" not in dead_names
+    assert "cmd_deploy" not in dead_names
+    assert "do_build" not in dead_names
+
+
+def test_chained_self_calls_resolution(tmp_path):
+    """Verify chained self calls like self.service.run() correctly resolve without being marked dead."""
+    (tmp_path / "service.py").write_text(
+        """class Worker:
+    def execute_task(self):
+        return 42
+
+class Coordinator:
+    def __init__(self):
+        self.worker = Worker()
+
+    def run(self):
+        return self.worker.execute_task()
+
+def main():
+    c = Coordinator()
+    c.run()
+""",
+        encoding="utf-8",
+    )
+
+    report = detect_dead_code(workspace_root=tmp_path)
+    dead_names = [s.name for s in report.dead_symbols]
+
+    assert "execute_task" not in dead_names
+    assert "run" not in dead_names
+    assert "Coordinator" not in dead_names
+    assert "Worker" not in dead_names
+
+
+def test_properties_on_alive_classes_preserved(tmp_path):
+    """Verify @property and @cached_property methods on alive classes are preserved, but dead on unused classes."""
+    (tmp_path / "entities.py").write_text(
+        """from functools import cached_property
+
+class ActiveUser:
+    def __init__(self, name):
+        self._name = name
+
+    @property
+    def display_name(self):
+        return self._name
+
+    @cached_property
+    def upper_name(self):
+        return self._name.upper()
+
+class DeadClass:
+    @property
+    def dead_prop(self):
+        return 0
+
+def main():
+    u = ActiveUser("alice")
+    print(u.display_name)
+""",
+        encoding="utf-8",
+    )
+
+    report = detect_dead_code(workspace_root=tmp_path)
+    dead_names = [s.name for s in report.dead_symbols]
+
+    # Active class properties must not be flagged
+    assert "display_name" not in dead_names
+    assert "upper_name" not in dead_names
+
+    # Dead class and its property must be flagged
+    assert "DeadClass" in dead_names
+    assert "dead_prop" in dead_names
+
+
+def test_nested_inner_functions_reachability(tmp_path):
+    """Verify inner nested functions called by an active parent are alive, while truly unused inner functions are flagged."""
+    (tmp_path / "nested.py").write_text(
+        """def active_outer():
+    def used_inner(val):
+        return val * 2
+
+    def unused_inner():
+        return -1
+
+    return used_inner(21)
+
+def main():
+    active_outer()
+""",
+        encoding="utf-8",
+    )
+
+    # By default (include_unexported=False), unexported unused_inner is omitted
+    report_default = detect_dead_code(workspace_root=tmp_path, include_unexported=False)
+    dead_default = [s.name for s in report_default.dead_symbols]
+    assert "active_outer" not in dead_default
+    assert "used_inner" not in dead_default
+
+    # With include_unexported=True, unused_inner must be caught as dead
+    report_all = detect_dead_code(workspace_root=tmp_path, include_unexported=True)
+    dead_all = [s.name for s in report_all.dead_symbols]
+    assert "unused_inner" in dead_all
+    assert "used_inner" not in dead_all
+
+
+def test_polymorphic_method_resolution(tmp_path):
+    """Verify polymorphic calls like obj.to_dict() resolve across multiple implementations without false dead flags."""
+    (tmp_path / "poly.py").write_text(
+        """class ModelA:
+    def serialize(self):
+        return "A"
+
+class ModelB:
+    def serialize(self):
+        return "B"
+
+def main():
+    items = [ModelA(), ModelB()]
+    for item in items:
+        item.serialize()
+""",
+        encoding="utf-8",
+    )
+
+    report = detect_dead_code(workspace_root=tmp_path)
+    dead_names = [s.name for s in report.dead_symbols]
+
+    # Both ModelA.serialize and ModelB.serialize must be alive
+    assert "serialize" not in dead_names
+    assert "ModelA" not in dead_names
+    assert "ModelB" not in dead_names
+
+
+def test_nested_mutual_cycles(tmp_path):
+    """Verify nested mutual cycles where cycle A calls cycle B, neither having an entrypoint."""
+    (tmp_path / "cycles.py").write_text(
+        """def main():
+    pass
+
+def group1_a():
+    group1_b()
+
+def group1_b():
+    group1_a()
+    group2_a()
+
+def group2_a():
+    group2_b()
+
+def group2_b():
+    group2_a()
+""",
+        encoding="utf-8",
+    )
+
+    report = detect_dead_code(workspace_root=tmp_path)
+    dead_names = [s.name for s in report.dead_symbols]
+
+    assert "group1_a" in dead_names
+    assert "group1_b" in dead_names
+    assert "group2_a" in dead_names
+    assert "group2_b" in dead_names
+
+
+def test_paths_filtering_with_relative_and_dot_prefixes(tmp_path):
+    """Verify paths filter works with './' prefixes, subdirectories, and absolute paths."""
+    pkg = tmp_path / "nested_dir"
+    pkg.mkdir()
+    (pkg / "sub.py").write_text("def unused_in_sub(): pass\n", encoding="utf-8")
+    (tmp_path / "root_unused.py").write_text("def unused_in_root(): pass\n", encoding="utf-8")
+
+    # Filter with './nested_dir'
+    report = detect_dead_code(workspace_root=tmp_path, paths=["./nested_dir"])
+    dead_names = [s.name for s in report.dead_symbols]
+    assert "unused_in_sub" in dead_names
+    assert "unused_in_root" not in dead_names
+
+    # Filter with absolute path
+    report_abs = detect_dead_code(workspace_root=tmp_path, paths=[str((pkg / "sub.py").resolve())])
+    dead_names_abs = [s.name for s in report_abs.dead_symbols]
+    assert "unused_in_sub" in dead_names_abs
+    assert "unused_in_root" not in dead_names_abs
+
