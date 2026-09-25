@@ -20,67 +20,15 @@ from typing import Any, Dict, List, Optional, Tuple
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from code_oracle.dataset import DatasetGenerator, DatasetRecord
+from code_oracle.dataset import (
+    DEFAULT_HELDOUT_REPOS,
+    DEFAULT_TOP_REPOS,
+    FALLBACK_REPOS,
+    KNOWN_REPOS,
+    DatasetGenerator,
+    DatasetRecord,
+)
 from code_oracle.linearizer import estimate_tokens
-
-DEFAULT_TOP_REPOS = [
-    {
-        "language": "python",
-        "name": "requests",
-        "url": "https://github.com/psf/requests.git",
-    },
-    {
-        "language": "typescript",
-        "name": "zod",
-        "url": "https://github.com/colinhacks/zod.git",
-    },
-    {
-        "language": "go",
-        "name": "gin",
-        "url": "https://github.com/gin-gonic/gin.git",
-    },
-    {
-        "language": "rust",
-        "name": "ripgrep",
-        "url": "https://github.com/BurntSushi/ripgrep.git",
-    },
-]
-
-KNOWN_REPOS: Dict[str, Dict[str, str]] = {
-    # Python
-    "requests": {"language": "python", "name": "requests", "url": "https://github.com/psf/requests.git"},
-    "psf/requests": {"language": "python", "name": "requests", "url": "https://github.com/psf/requests.git"},
-    "fastapi": {"language": "python", "name": "fastapi", "url": "https://github.com/tiangolo/fastapi.git"},
-    "tiangolo/fastapi": {"language": "python", "name": "fastapi", "url": "https://github.com/tiangolo/fastapi.git"},
-    "rich": {"language": "python", "name": "rich", "url": "https://github.com/Textualize/rich.git"},
-    "textualize/rich": {"language": "python", "name": "rich", "url": "https://github.com/Textualize/rich.git"},
-    # TypeScript
-    "zod": {"language": "typescript", "name": "zod", "url": "https://github.com/colinhacks/zod.git"},
-    "colinhacks/zod": {"language": "typescript", "name": "zod", "url": "https://github.com/colinhacks/zod.git"},
-    "express": {"language": "typescript", "name": "express", "url": "https://github.com/expressjs/express.git"},
-    "expressjs/express": {"language": "typescript", "name": "express", "url": "https://github.com/expressjs/express.git"},
-    "trpc": {"language": "typescript", "name": "trpc", "url": "https://github.com/trpc/trpc.git"},
-    "trpc/trpc": {"language": "typescript", "name": "trpc", "url": "https://github.com/trpc/trpc.git"},
-    # Go
-    "gin": {"language": "go", "name": "gin", "url": "https://github.com/gin-gonic/gin.git"},
-    "gin-gonic/gin": {"language": "go", "name": "gin", "url": "https://github.com/gin-gonic/gin.git"},
-    "cobra": {"language": "go", "name": "cobra", "url": "https://github.com/spf13/cobra.git"},
-    "spf13/cobra": {"language": "go", "name": "cobra", "url": "https://github.com/spf13/cobra.git"},
-    # Rust
-    "ripgrep": {"language": "rust", "name": "ripgrep", "url": "https://github.com/BurntSushi/ripgrep.git"},
-    "burntsushi/ripgrep": {"language": "rust", "name": "ripgrep", "url": "https://github.com/BurntSushi/ripgrep.git"},
-    "axum": {"language": "rust", "name": "axum", "url": "https://github.com/tokio-rs/axum.git"},
-    "tokio-rs/axum": {"language": "rust", "name": "axum", "url": "https://github.com/tokio-rs/axum.git"},
-    "clap": {"language": "rust", "name": "clap", "url": "https://github.com/clap-rs/clap.git"},
-    "clap-rs/clap": {"language": "rust", "name": "clap", "url": "https://github.com/clap-rs/clap.git"},
-}
-
-FALLBACK_REPOS = {
-    "python": "https://github.com/tiangolo/fastapi.git",
-    "typescript": "https://github.com/trpc/trpc.git",
-    "go": "https://github.com/spf13/cobra.git",
-    "rust": "https://github.com/clap-rs/clap.git",
-}
 
 
 def resolve_repo_spec(spec: str) -> Dict[str, str]:
@@ -109,24 +57,75 @@ def resolve_repo_spec(spec: str) -> Dict[str, str]:
     return {"language": "python", "name": repo_name, "url": url}
 
 
-def shallow_clone_repo(url: str, dest_dir: Path, depth: int = 50) -> Path:
+def find_local_cached_repo(repo_name: str, cache_dir: Path) -> Optional[Path]:
     """
-    Shallow-clone a git repository (--depth 50) into dest_dir if not already present.
+    Search local cache directories for an existing clone:
+    1. cache_dir / repo_name
+    2. REPO_ROOT / "benchmarks_repos" / repo_name
+    """
+    candidates = [
+        cache_dir / repo_name,
+        REPO_ROOT / "benchmarks_repos" / repo_name,
+    ]
+    for cand in candidates:
+        if cand.exists() and (cand / ".git").exists():
+            return cand
+    return None
+
+
+def _attempt_fetch_depth(repo_path: Path, depth: int = 250) -> None:
+    """Attempt deepening clone history if network is available; fail silently if offline."""
+    try:
+        count_res = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if count_res.returncode == 0:
+            count = int(count_res.stdout.strip())
+            if count < depth:
+                subprocess.run(
+                    ["git", "fetch", "--depth", str(depth)],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+    except Exception:
+        pass
+
+
+def shallow_clone_repo(url: str, dest_dir: Path, depth: int = 250) -> Path:
+    """
+    Shallow-clone a git repository into dest_dir if not already present.
+    Reuses existing local clone from benchmarks_repos/ or cache_dir to save bandwidth
+    and operate gracefully in offline environments.
     Returns the path to the cloned repository.
     """
     dest_dir = dest_dir.resolve()
     if dest_dir.exists() and (dest_dir / ".git").exists():
-        print(f"[*] Repository already cached: {dest_dir}")
+        print(f"[*] Repository already cached in target: {dest_dir}")
+        _attempt_fetch_depth(dest_dir, depth)
         return dest_dir
+
+    # Check local benchmarks_repos/ cache
+    local_cached = find_local_cached_repo(dest_dir.name, dest_dir.parent)
+    if local_cached and local_cached.exists() and (local_cached / ".git").exists():
+        print(f"[*] Reusing locally cached repository: {local_cached}")
+        _attempt_fetch_depth(local_cached, depth)
+        return local_cached
 
     dest_dir.parent.mkdir(parents=True, exist_ok=True)
     print(f"[*] Cloning {url} (shallow, --depth {depth}) into {dest_dir}...")
     cmd = ["git", "clone", "--depth", str(depth), url, str(dest_dir)]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if res.returncode != 0:
         raise RuntimeError(f"Failed to clone {url}: {res.stderr.strip()}")
     print(f"[+] Successfully cloned: {dest_dir.name}")
     return dest_dir
+
 
 
 def balance_dataset(
@@ -175,6 +174,92 @@ def balance_dataset(
     return balanced
 
 
+def mine_heldout_eval_dataset(
+    cache_dir: Path,
+    output_dir: Path,
+    target_samples: int = 400,
+    seed: int = 42,
+    custom_repos: Optional[List[Dict[str, str]]] = None,
+    mined_samples_per_repo: int = 50,
+    filter_symbolic_gate: bool = True,
+    heldout_filename: str = "dataset_heldout_eval.jsonl",
+) -> int:
+    """
+    Mine designated held-out evaluation repositories (unseen during training)
+    across Python, TypeScript, Go, and Rust.
+    Strictly filters via symbolic gate (filter_symbolic_gate=True) and balances
+    PASS/REJECT classes to enable rigorous, independent generalization benchmarking.
+    """
+    cache_dir = Path(cache_dir).resolve()
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    heldout_repos = custom_repos if custom_repos is not None else DEFAULT_HELDOUT_REPOS
+    all_mined_records: List[DatasetRecord] = []
+
+    print(f"\n[*] Starting Held-Out Evaluation Dataset Mining (Target: {target_samples} samples)...")
+    for repo_info in heldout_repos:
+        lang = repo_info["language"]
+        name = repo_info["name"]
+        url = repo_info["url"]
+        dest = cache_dir / name
+
+        try:
+            repo_path = shallow_clone_repo(url, dest, depth=250)
+            generator = DatasetGenerator(languages=[lang], seed=seed, filter_symbolic_gate=filter_symbolic_gate)
+            print(f"[*] Mining held-out {lang} repository ({name}) from {repo_path}...")
+            mined = generator.mine_repository(repo_path, max_samples=mined_samples_per_repo)
+            print(f"    [+] Extracted {len(mined)} held-out samples from {name} ({lang})")
+            all_mined_records.extend(mined)
+        except Exception as e:
+            print(f"[!] Warning: Mining held-out repo {name} ({url}) failed: {e}. Supplementing...")
+
+    # Group mined records by language
+    records_by_lang: Dict[str, List[DatasetRecord]] = {}
+    for r in all_mined_records:
+        records_by_lang.setdefault(r.language, []).append(r)
+
+    languages = ["python", "typescript", "go", "rust"]
+    per_lang_target = max(4, target_samples // len(languages))
+    per_lang_pos_target = per_lang_target // 2
+    per_lang_neg_target = per_lang_target - per_lang_pos_target
+
+    final_pool: List[DatasetRecord] = []
+    for lang in languages:
+        lang_records = records_by_lang.get(lang, [])
+        positives = [r for r in lang_records if r.label == 1]
+        negatives = [r for r in lang_records if r.label == 0]
+
+        # If needed, supplement with subtle gate-passing synthetic samples
+        needed_pos = max(0, per_lang_pos_target - len(positives))
+        needed_neg = max(0, per_lang_neg_target - len(negatives))
+        needed_synth = max(0, (needed_pos + needed_neg) * 2)
+
+        if needed_synth > 0:
+            synth_gen = DatasetGenerator(languages=[lang], seed=seed + 99, filter_symbolic_gate=filter_symbolic_gate)
+            synth_records = synth_gen.generate_synthetic_dataset(num_samples=needed_synth, include_subtle=True)
+            positives.extend([r for r in synth_records if r.label == 1 and r.language == lang])
+            negatives.extend([r for r in synth_records if r.label == 0 and r.language == lang])
+
+        lang_pos = positives[:per_lang_pos_target]
+        lang_neg = negatives[:per_lang_neg_target]
+
+        parity = min(len(lang_pos), len(lang_neg))
+        final_pool.extend(lang_pos[:parity])
+        final_pool.extend(lang_neg[:parity])
+
+    rng = random.Random(seed)
+    rng.shuffle(final_pool)
+
+    out_file = output_dir / heldout_filename
+    with open(out_file, "w", encoding="utf-8") as f:
+        for rec in final_pool:
+            f.write(json.dumps(rec.to_dict()) + "\n")
+
+    print(f"[+] Held-out evaluation dataset generated: {out_file} ({len(final_pool)} samples)")
+    return len(final_pool)
+
+
 def mine_all_top_repos(
     cache_dir: Path,
     output_dir: Path,
@@ -183,7 +268,9 @@ def mine_all_top_repos(
     seed: int = 42,
     custom_repos: Optional[List[Dict[str, str]]] = None,
     mined_samples_per_repo: int = 50,
-    filter_symbolic_gate: bool = False,
+    filter_symbolic_gate: bool = True,
+    generate_heldout: bool = True,
+    heldout_samples: int = 400,
 ) -> Tuple[int, int]:
     """
     Main orchestration routine:
@@ -192,6 +279,7 @@ def mine_all_top_repos(
     3. Supplement with synthetic pairs where needed to achieve full balance and target size.
     4. Balance classes and languages evenly.
     5. Write dataset_train.jsonl and dataset_val.jsonl into output_dir.
+    6. Optionally mine dedicated held-out evaluation dataset (dataset_heldout_eval.jsonl).
     Returns: (train_count, val_count)
     """
     cache_dir = Path(cache_dir).resolve()
@@ -211,7 +299,7 @@ def mine_all_top_repos(
         dest = cache_dir / name
 
         try:
-            repo_path = shallow_clone_repo(url, dest)
+            repo_path = shallow_clone_repo(url, dest, depth=250)
             generator = DatasetGenerator(languages=[lang], seed=seed, filter_symbolic_gate=filter_symbolic_gate)
             print(f"[*] Mining {lang} repository ({name}) from {repo_path}...")
             mined = generator.mine_repository(repo_path, max_samples=per_repo_target)
@@ -224,7 +312,7 @@ def mine_all_top_repos(
                 try:
                     fallback_name = Path(fallback_url.rstrip("/")).stem.removesuffix(".git")
                     fb_dest = cache_dir / fallback_name
-                    fb_path = shallow_clone_repo(fallback_url, fb_dest)
+                    fb_path = shallow_clone_repo(fallback_url, fb_dest, depth=250)
                     fb_generator = DatasetGenerator(languages=[lang], seed=seed, filter_symbolic_gate=filter_symbolic_gate)
                     mined = fb_generator.mine_repository(fb_path, max_samples=per_repo_target)
                     print(f"    [+] Extracted {len(mined)} raw samples from fallback {fallback_name} ({lang})")
@@ -258,7 +346,7 @@ def mine_all_top_repos(
 
         if needed_synth > 0:
             synth_gen = DatasetGenerator(languages=[lang], seed=seed + 10, filter_symbolic_gate=filter_symbolic_gate)
-            synth_records = synth_gen.generate_synthetic_dataset(num_samples=needed_synth)
+            synth_records = synth_gen.generate_synthetic_dataset(num_samples=needed_synth, include_subtle=True)
             positives.extend([r for r in synth_records if r.label == 1 and r.language == lang])
             negatives.extend([r for r in synth_records if r.label == 0 and r.language == lang])
 
@@ -304,6 +392,18 @@ def mine_all_top_repos(
     print(f"    - dataset_train.jsonl: {len(train_records)} samples")
     print(f"    - dataset_val.jsonl:   {len(val_records)} samples")
     print(f"    - Total Balanced:      {len(final_pool)} samples")
+
+    if generate_heldout:
+        heldout_repos = [] if custom_repos == [] else None
+        mine_heldout_eval_dataset(
+            cache_dir=cache_dir,
+            output_dir=output_dir,
+            target_samples=heldout_samples,
+            seed=seed + 777,
+            custom_repos=heldout_repos,
+            mined_samples_per_repo=mined_samples_per_repo,
+            filter_symbolic_gate=filter_symbolic_gate,
+        )
 
     return len(train_records), len(val_records)
 
@@ -362,11 +462,53 @@ def main() -> int:
     parser.add_argument(
         "--filter-symbolic-gate",
         action="store_true",
-        default=False,
+        default=True,
         help="Filter out mutations that fail symbolic gate (keep only gray-area hard negatives).",
+    )
+    parser.add_argument(
+        "--no-filter-symbolic-gate",
+        action="store_false",
+        dest="filter_symbolic_gate",
+        help="Disable symbolic gate filtering (allow mutations failing Stage 1 & 2 AST checks).",
+    )
+    parser.add_argument(
+        "--generate-heldout",
+        action="store_true",
+        default=True,
+        help="Also generate dataset_heldout_eval.jsonl from unseen evaluation repositories.",
+    )
+    parser.add_argument(
+        "--no-heldout",
+        action="store_false",
+        dest="generate_heldout",
+        help="Skip generating dataset_heldout_eval.jsonl.",
+    )
+    parser.add_argument(
+        "--heldout-samples",
+        type=int,
+        default=400,
+        help="Number of balanced samples to generate for dataset_heldout_eval.jsonl.",
+    )
+    parser.add_argument(
+        "--heldout-only",
+        action="store_true",
+        default=False,
+        help="Only mine and generate held-out evaluation dataset (skip train/val).",
     )
 
     args = parser.parse_args()
+
+    if args.heldout_only:
+        heldout_count = mine_heldout_eval_dataset(
+            cache_dir=args.cache_dir,
+            output_dir=args.output_dir,
+            target_samples=args.heldout_samples,
+            seed=args.seed,
+            mined_samples_per_repo=args.mine_samples_per_repo,
+            filter_symbolic_gate=args.filter_symbolic_gate,
+        )
+        print(f"[✓] Held-out evaluation dataset generated with {heldout_count} samples.")
+        return 0
 
     custom_repos = None
     if args.repos:
@@ -386,6 +528,8 @@ def main() -> int:
         custom_repos=custom_repos,
         mined_samples_per_repo=args.mine_samples_per_repo,
         filter_symbolic_gate=args.filter_symbolic_gate,
+        generate_heldout=args.generate_heldout,
+        heldout_samples=args.heldout_samples,
     )
 
     if train_n + val_n < 2000 or train_n + val_n > 4000:
@@ -398,3 +542,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

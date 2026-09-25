@@ -472,3 +472,189 @@ def test_cli_dataset_subtle_options():
                 assert "STATUS: APPROVED" in d["input_dsl"]
 
 
+def test_revert_commit_bug_resolution():
+    """Test that mine_git_history resolves original buggy commit diffs referenced in revert commits."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        subprocess.run(["git", "init"], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp), check=True, capture_output=True)
+
+        f = tmp / "worker.py"
+        f.write_text("def process(items: list) -> int:\n    return len(items)\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial worker"], cwd=str(tmp), check=True, capture_output=True)
+
+        # Introduce buggy commit
+        f.write_text("def process(items: list) -> int:\n    # Buggy change\n    return len(items) + 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: add offset to item count"], cwd=str(tmp), check=True, capture_output=True)
+        bug_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(tmp), capture_output=True, text=True).stdout.strip()
+
+        # Create revert commit referencing the bug hash
+        subprocess.run(["git", "revert", "--no-edit", "HEAD"], cwd=str(tmp), check=True, capture_output=True)
+
+        gen = DatasetGenerator(languages=["python"], seed=42)
+        records = gen.mine_git_history(tmp, max_samples=10)
+
+        reverts = [r for r in records if r.category == "real_revert"]
+        assert len(reverts) > 0
+        for r in reverts:
+            assert r.label == 0
+            assert r.risk_score >= 0.75
+            assert r.symbolic_gate_passed is True
+
+
+def test_hotfix_commit_pair_resolution():
+    """Test that hotfix commits produce both the fix (label=1) and the pre-fix buggy state (label=0)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        subprocess.run(["git", "init"], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp), check=True, capture_output=True)
+
+        f = tmp / "server.py"
+        f.write_text("def serve() -> str:\n    return 'initial'\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial server"], cwd=str(tmp), check=True, capture_output=True)
+
+        # Hotfix commit fixing race condition
+        f.write_text("def serve() -> str:\n    # fix concurrency race condition with atomic check\n    return 'fixed'\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(tmp), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "fix: resolve concurrency race condition in serve handler"], cwd=str(tmp), check=True, capture_output=True)
+
+        gen = DatasetGenerator(languages=["python"], seed=42)
+        records = gen.mine_git_history(tmp, max_samples=10)
+
+        hotfixes = [r for r in records if r.source_type == "real_hotfix" and r.label == 1]
+        buggy_counterparts = [r for r in records if r.source_type == "real_hotfix" and r.label == 0]
+
+        assert len(hotfixes) >= 1
+        assert len(buggy_counterparts) >= 1
+
+        # The paired buggy sample should activate ConcurrencyHazard taxonomy due to commit message
+        bug_rec = buggy_counterparts[0]
+        assert bug_rec.taxonomy_labels["ConcurrencyHazard"] > 0.6
+        assert bug_rec.risk_score >= 0.75
+
+
+def test_repo_catalog_coverage():
+    """Verify that DEFAULT_TOP_REPOS and DEFAULT_HELDOUT_REPOS cover designated repos across 4 languages."""
+    from code_oracle.dataset import DEFAULT_TOP_REPOS, DEFAULT_HELDOUT_REPOS, KNOWN_REPOS
+
+    top_names = {r["name"] for r in DEFAULT_TOP_REPOS}
+    # Python
+    assert "fastapi" in top_names
+    assert "pydantic" in top_names
+    assert "requests" in top_names
+    assert "starlette" in top_names
+    # TypeScript
+    assert "hono" in top_names
+    assert "zod" in top_names
+    assert "trpc" in top_names
+    assert "nest" in top_names
+    # Go
+    assert "gin" in top_names
+    assert "cobra" in top_names
+    assert "fiber" in top_names
+    assert "client-go" in top_names
+    # Rust
+    assert "tokio" in top_names
+    assert "axum" in top_names
+    assert "ripgrep" in top_names
+    assert "clap" in top_names
+
+    heldout_names = {r["name"] for r in DEFAULT_HELDOUT_REPOS}
+    assert "flask" in heldout_names
+    assert "httpx" in heldout_names
+    assert "fastify" in heldout_names
+    assert "chi" in heldout_names
+    assert "serde" in heldout_names
+
+    # Check KNOWN_REPOS lookup
+    assert "tiangolo/fastapi" in KNOWN_REPOS
+    assert "pallets/flask" in KNOWN_REPOS
+    assert "honojs/hono" in KNOWN_REPOS
+    assert "fastify/fastify" in KNOWN_REPOS
+    assert "gin-gonic/gin" in KNOWN_REPOS
+    assert "go-chi/chi" in KNOWN_REPOS
+    assert "tokio-rs/tokio" in KNOWN_REPOS
+    assert "serde-rs/serde" in KNOWN_REPOS
+
+
+def test_adr0003_taxonomy_context_keyword_assignment():
+    """Verify assign_taxonomy_labels maps commit message keywords to correct ADR-0003 taxonomy classes."""
+    # Concurrency Hazard
+    tax_conc = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="fix data race on threadpool queue")
+    assert tax_conc["ConcurrencyHazard"] > 0.8
+
+    # Performance Regression
+    tax_perf = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="fix memory leak and slow quadratic loop")
+    assert tax_perf["PerformanceRegression"] > 0.8
+
+    # Breaking Public API
+    tax_api = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="breaking: change public export function signature")
+    assert tax_api["BreakingPublicAPI"] > 0.8
+
+    # Security Surface
+    tax_sec = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="fix CVE authorization bypass and token sanitize")
+    assert tax_sec["SecuritySurface"] > 0.8
+
+    # Silent Logic Drift
+    tax_logic = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="fix off by one index calculation error")
+    assert tax_logic["SilentLogicDrift"] > 0.8
+
+
+def test_adr0003_taxonomy_stem_variants():
+    """Verify assign_taxonomy_labels matches word stem variants (concurrency, deprecation, etc.)."""
+    # Concurrency stem variants
+    t1 = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="fix concurrency deadlock hazard")
+    assert t1["ConcurrencyHazard"] > 0.8
+
+    t2 = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="fix concurrent read modification")
+    assert t2["ConcurrencyHazard"] > 0.8
+
+    # Performance stem variants
+    t3 = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="fix excessive heap allocation and memory leak")
+    assert t3["PerformanceRegression"] > 0.8
+
+    # Breaking Public API stem variants
+    t4 = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="fix deprecation warning by updating parameter names")
+    assert t4["BreakingPublicAPI"] > 0.8
+
+    # Security Surface stem variants
+    t5 = DatasetRecord.assign_taxonomy_labels("real_revert", 0, 0.9, context_text="patch critical vulnerabilities in authentication handler")
+    assert t5["SecuritySurface"] > 0.8
+
+
+def test_engine_verify_with_historical_original_content(tmp_path: Path):
+    """Verify TopoSliceEngine.verify accurately evaluates historical patches using original_content baseline."""
+    from code_oracle.engine import TopoSliceEngine
+
+    # Working directory file has drifted significantly to v3
+    f = tmp_path / "service.py"
+    f.write_text("def unrelated_new_function():\n    return 'v3'\n", encoding="utf-8")
+
+    engine = TopoSliceEngine(workspace_root=tmp_path)
+    engine.indexer.scan_workspace()
+
+    # Historical file content at v1
+    v1_content = "def calculate_fee(amount: int) -> int:\n    return amount * 10\n"
+
+    # Historical patch from v1 to v2: changes fee multiplier
+    diff_text = (
+        "--- a/service.py\n"
+        "+++ b/service.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def calculate_fee(amount: int) -> int:\n"
+        "-    return amount * 10\n"
+        "+    return amount * 15\n"
+    )
+
+    # When verified with original_content=v1_content, it must pass without syntax error
+    rep = engine.verify("service.py", diff_text, original_content=v1_content)
+    assert rep.status == "APPROVED"
+    assert "calculate_fee" in rep.affected_symbols
+
+
+

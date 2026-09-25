@@ -331,10 +331,13 @@ def main() -> int:
     else:
         train_file = args.data_dir / "dataset_train.jsonl"
         val_file = args.data_dir / "dataset_val.jsonl"
+        heldout_file = args.data_dir / "dataset_heldout_eval.jsonl"
         if train_file.exists():
             files_to_inspect.append(train_file)
         if val_file.exists():
             files_to_inspect.append(val_file)
+        if heldout_file.exists():
+            files_to_inspect.append(heldout_file)
 
     if not files_to_inspect:
         print(f"[!] No dataset files found in {args.data_dir} or specified file.")

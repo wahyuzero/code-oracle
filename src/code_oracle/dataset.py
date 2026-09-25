@@ -49,30 +49,118 @@ class DatasetRecord:
                 if c not in self.taxonomy_labels:
                     self.taxonomy_labels[c] = 0.0
 
-    @staticmethod
-    def _default_taxonomy_for_category(category: str, label: int, risk_score: float) -> Dict[str, float]:
+    @classmethod
+    def assign_taxonomy_labels(
+        cls,
+        category: str,
+        label: int,
+        risk_score: float,
+        context_text: str = "",
+        invariant_violations: Optional[List[str]] = None,
+    ) -> Dict[str, float]:
+        """
+        Assign ADR-0003 multi-task risk taxonomy scores:
+        BreakingPublicAPI, SecuritySurface, ConcurrencyHazard, PerformanceRegression, SilentLogicDrift.
+        """
         base = {c: 0.0 for c in TAXONOMY_CLASSES}
         if label == 1:
             return base
 
-        score = max(0.6, min(1.0, risk_score))
+        score = max(0.65, min(1.0, risk_score))
         cat_lower = category.lower()
-        if "concurrency_leak" in cat_lower or "goroutine" in cat_lower or "thread" in cat_lower or "deadlock" in cat_lower or "race" in cat_lower or "mutex" in cat_lower or "concurr" in cat_lower:
+
+        # 1. Exact Category-Based Mapping (ADR-0003 specification)
+        if (
+            "concurrency_leak" in cat_lower
+            or "concurrency_hazard" in cat_lower
+            or "goroutine" in cat_lower
+            or "thread" in cat_lower
+            or "deadlock" in cat_lower
+            or "race" in cat_lower
+            or "mutex" in cat_lower
+            or "concurr" in cat_lower
+        ):
             base["ConcurrencyHazard"] = score
-        elif "resource_leak" in cat_lower or "memory_leak" in cat_lower or "resource" in cat_lower or "memory" in cat_lower or "perf" in cat_lower or "quadratic" in cat_lower or "loop" in cat_lower or "timeout" in cat_lower or "slow" in cat_lower or "leak" in cat_lower:
+        elif (
+            "resource_leak" in cat_lower
+            or "memory_leak" in cat_lower
+            or "performance_regression" in cat_lower
+            or "resource" in cat_lower
+            or "memory" in cat_lower
+            or "perf" in cat_lower
+            or "quadratic" in cat_lower
+            or "loop" in cat_lower
+            or "timeout" in cat_lower
+            or "slow" in cat_lower
+            or "leak" in cat_lower
+        ):
             base["PerformanceRegression"] = score
-        elif "api" in cat_lower or "arity" in cat_lower or "keyword" in cat_lower or "type_drift" in cat_lower or "deleted" in cat_lower or "param" in cat_lower or "signature" in cat_lower:
+        elif (
+            "api" in cat_lower
+            or "arity" in cat_lower
+            or "keyword" in cat_lower
+            or "type_drift" in cat_lower
+            or "deleted" in cat_lower
+            or "param" in cat_lower
+            or "signature" in cat_lower
+            or "breaking" in cat_lower
+        ):
             base["BreakingPublicAPI"] = score
-        elif "security" in cat_lower or "surface" in cat_lower or "taint" in cat_lower or "side_effect" in cat_lower or "cve" in cat_lower or "vuln" in cat_lower or "auth" in cat_lower or "sanitize" in cat_lower:
+        elif (
+            "security" in cat_lower
+            or "surface" in cat_lower
+            or "taint" in cat_lower
+            or "side_effect" in cat_lower
+            or "cve" in cat_lower
+            or "vuln" in cat_lower
+            or "auth" in cat_lower
+            or "sanitize" in cat_lower
+        ):
             base["SecuritySurface"] = score
         elif "logic" in cat_lower or "drift" in cat_lower:
             base["SilentLogicDrift"] = score
         elif "circular" in cat_lower:
             base["BreakingPublicAPI"] = round(score * 0.7, 4)
             base["SilentLogicDrift"] = round(score * 0.8, 4)
-        else:
+
+        # 2. Context-Based Keyword Matching (for real_revert and real_hotfix commits)
+        if context_text:
+            normalized_ctx = context_text.lower().replace("_", " ").replace("-", " ")
+            if re.search(r"\b(race|race condition|data race|deadlock|mutex|rwlock|atomic|goroutine|channel|hazard|concurr\w*)\b", normalized_ctx):
+                base["ConcurrencyHazard"] = max(base["ConcurrencyHazard"], score)
+            if re.search(r"\b(perf\w*|performance|memory leak|resource leak|slow\w*|speed|alloc\w*|latency|cpu|timeout|hang)\b", normalized_ctx):
+                base["PerformanceRegression"] = max(base["PerformanceRegression"], score)
+            if re.search(r"\b(breaking|deprecat\w*|signature|param\w*|argument\w*|interface|proto|abi|export|arity)\b", normalized_ctx):
+                base["BreakingPublicAPI"] = max(base["BreakingPublicAPI"], score)
+            if re.search(r"\b(security|cve|vuln\w*|vulnerability|vulnerabilities|xss|csrf|injection|auth\w*|token|sanitize|escape|permission|privilege|secret|credential|overflow|ssrf)\b", normalized_ctx):
+                base["SecuritySurface"] = max(base["SecuritySurface"], score)
+            if re.search(r"\b(logic|off by one|wrong|incorrect|regression|edge case|boundary|nil|null|unhandled|condition)\b", normalized_ctx):
+                base["SilentLogicDrift"] = max(base["SilentLogicDrift"], score)
+
+        if invariant_violations:
+            for v in invariant_violations:
+                v_lower = v.lower()
+                if "cycle" in v_lower:
+                    base["BreakingPublicAPI"] = max(base["BreakingPublicAPI"], round(score * 0.7, 4))
+                    base["SilentLogicDrift"] = max(base["SilentLogicDrift"], round(score * 0.8, 4))
+                if "arity" in v_lower or "keyword" in v_lower:
+                    base["BreakingPublicAPI"] = max(base["BreakingPublicAPI"], score)
+                if "security" in v_lower:
+                    base["SecuritySurface"] = max(base["SecuritySurface"], score)
+                if "perf" in v_lower or "leak" in v_lower:
+                    base["PerformanceRegression"] = max(base["PerformanceRegression"], score)
+
+        # Fallback to SilentLogicDrift if no specific category was activated
+        if not any(v > 0.0 for v in base.values()):
             base["SilentLogicDrift"] = score
-        return base
+
+        return {k: round(v, 4) for k, v in base.items()}
+
+
+    @staticmethod
+    def _default_taxonomy_for_category(category: str, label: int, risk_score: float) -> Dict[str, float]:
+        return DatasetRecord.assign_taxonomy_labels(category=category, label=label, risk_score=risk_score)
+
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -98,6 +186,112 @@ class DatasetRecord:
             symbolic_gate_passed=data.get("symbolic_gate_passed", True),
             source_type=data.get("source_type", "mutation_subtle"),
         )
+# Default Top-Tier Target Repositories (Python, TypeScript, Go, Rust)
+DEFAULT_TOP_REPOS: List[Dict[str, str]] = [
+    # Python
+    {"language": "python", "name": "fastapi", "url": "https://github.com/tiangolo/fastapi.git"},
+    {"language": "python", "name": "pydantic", "url": "https://github.com/pydantic/pydantic.git"},
+    {"language": "python", "name": "requests", "url": "https://github.com/psf/requests.git"},
+    {"language": "python", "name": "starlette", "url": "https://github.com/encode/starlette.git"},
+    # TypeScript
+    {"language": "typescript", "name": "hono", "url": "https://github.com/honojs/hono.git"},
+    {"language": "typescript", "name": "zod", "url": "https://github.com/colinhacks/zod.git"},
+    {"language": "typescript", "name": "trpc", "url": "https://github.com/trpc/trpc.git"},
+    {"language": "typescript", "name": "nest", "url": "https://github.com/nestjs/nest.git"},
+    # Go
+    {"language": "go", "name": "gin", "url": "https://github.com/gin-gonic/gin.git"},
+    {"language": "go", "name": "cobra", "url": "https://github.com/spf13/cobra.git"},
+    {"language": "go", "name": "fiber", "url": "https://github.com/gofiber/fiber.git"},
+    {"language": "go", "name": "client-go", "url": "https://github.com/kubernetes/client-go.git"},
+    # Rust
+    {"language": "rust", "name": "tokio", "url": "https://github.com/tokio-rs/tokio.git"},
+    {"language": "rust", "name": "axum", "url": "https://github.com/tokio-rs/axum.git"},
+    {"language": "rust", "name": "ripgrep", "url": "https://github.com/BurntSushi/ripgrep.git"},
+    {"language": "rust", "name": "clap", "url": "https://github.com/clap-rs/clap.git"},
+]
+
+# Designated Held-Out Evaluation Repositories for Independent Verification
+DEFAULT_HELDOUT_REPOS: List[Dict[str, str]] = [
+    # Python
+    {"language": "python", "name": "flask", "url": "https://github.com/pallets/flask.git"},
+    {"language": "python", "name": "httpx", "url": "https://github.com/encode/httpx.git"},
+    # TypeScript
+    {"language": "typescript", "name": "fastify", "url": "https://github.com/fastify/fastify.git"},
+    # Go
+    {"language": "go", "name": "chi", "url": "https://github.com/go-chi/chi.git"},
+    # Rust
+    {"language": "rust", "name": "serde", "url": "https://github.com/serde-rs/serde.git"},
+]
+
+KNOWN_REPOS: Dict[str, Dict[str, str]] = {
+    # Python - Target
+    "fastapi": {"language": "python", "name": "fastapi", "url": "https://github.com/tiangolo/fastapi.git"},
+    "tiangolo/fastapi": {"language": "python", "name": "fastapi", "url": "https://github.com/tiangolo/fastapi.git"},
+    "pydantic": {"language": "python", "name": "pydantic", "url": "https://github.com/pydantic/pydantic.git"},
+    "pydantic/pydantic": {"language": "python", "name": "pydantic", "url": "https://github.com/pydantic/pydantic.git"},
+    "requests": {"language": "python", "name": "requests", "url": "https://github.com/psf/requests.git"},
+    "psf/requests": {"language": "python", "name": "requests", "url": "https://github.com/psf/requests.git"},
+    "starlette": {"language": "python", "name": "starlette", "url": "https://github.com/encode/starlette.git"},
+    "encode/starlette": {"language": "python", "name": "starlette", "url": "https://github.com/encode/starlette.git"},
+    # Python - Held-out
+    "flask": {"language": "python", "name": "flask", "url": "https://github.com/pallets/flask.git"},
+    "pallets/flask": {"language": "python", "name": "flask", "url": "https://github.com/pallets/flask.git"},
+    "httpx": {"language": "python", "name": "httpx", "url": "https://github.com/encode/httpx.git"},
+    "encode/httpx": {"language": "python", "name": "httpx", "url": "https://github.com/encode/httpx.git"},
+    # Python - Additional
+    "rich": {"language": "python", "name": "rich", "url": "https://github.com/Textualize/rich.git"},
+    "textualize/rich": {"language": "python", "name": "rich", "url": "https://github.com/Textualize/rich.git"},
+
+    # TypeScript - Target
+    "hono": {"language": "typescript", "name": "hono", "url": "https://github.com/honojs/hono.git"},
+    "honojs/hono": {"language": "typescript", "name": "hono", "url": "https://github.com/honojs/hono.git"},
+    "zod": {"language": "typescript", "name": "zod", "url": "https://github.com/colinhacks/zod.git"},
+    "colinhacks/zod": {"language": "typescript", "name": "zod", "url": "https://github.com/colinhacks/zod.git"},
+    "trpc": {"language": "typescript", "name": "trpc", "url": "https://github.com/trpc/trpc.git"},
+    "trpc/trpc": {"language": "typescript", "name": "trpc", "url": "https://github.com/trpc/trpc.git"},
+    "nest": {"language": "typescript", "name": "nest", "url": "https://github.com/nestjs/nest.git"},
+    "nestjs/nest": {"language": "typescript", "name": "nest", "url": "https://github.com/nestjs/nest.git"},
+    # TypeScript - Held-out
+    "fastify": {"language": "typescript", "name": "fastify", "url": "https://github.com/fastify/fastify.git"},
+    "fastify/fastify": {"language": "typescript", "name": "fastify", "url": "https://github.com/fastify/fastify.git"},
+    # TypeScript - Additional
+    "express": {"language": "typescript", "name": "express", "url": "https://github.com/expressjs/express.git"},
+    "expressjs/express": {"language": "typescript", "name": "express", "url": "https://github.com/expressjs/express.git"},
+
+    # Go - Target
+    "gin": {"language": "go", "name": "gin", "url": "https://github.com/gin-gonic/gin.git"},
+    "gin-gonic/gin": {"language": "go", "name": "gin", "url": "https://github.com/gin-gonic/gin.git"},
+    "cobra": {"language": "go", "name": "cobra", "url": "https://github.com/spf13/cobra.git"},
+    "spf13/cobra": {"language": "go", "name": "cobra", "url": "https://github.com/spf13/cobra.git"},
+    "fiber": {"language": "go", "name": "fiber", "url": "https://github.com/gofiber/fiber.git"},
+    "gofiber/fiber": {"language": "go", "name": "fiber", "url": "https://github.com/gofiber/fiber.git"},
+    "client-go": {"language": "go", "name": "client-go", "url": "https://github.com/kubernetes/client-go.git"},
+    "kubernetes/client-go": {"language": "go", "name": "client-go", "url": "https://github.com/kubernetes/client-go.git"},
+    # Go - Held-out
+    "chi": {"language": "go", "name": "chi", "url": "https://github.com/go-chi/chi.git"},
+    "go-chi/chi": {"language": "go", "name": "chi", "url": "https://github.com/go-chi/chi.git"},
+
+    # Rust - Target
+    "tokio": {"language": "rust", "name": "tokio", "url": "https://github.com/tokio-rs/tokio.git"},
+    "tokio-rs/tokio": {"language": "rust", "name": "tokio", "url": "https://github.com/tokio-rs/tokio.git"},
+    "axum": {"language": "rust", "name": "axum", "url": "https://github.com/tokio-rs/axum.git"},
+    "tokio-rs/axum": {"language": "rust", "name": "axum", "url": "https://github.com/tokio-rs/axum.git"},
+    "ripgrep": {"language": "rust", "name": "ripgrep", "url": "https://github.com/BurntSushi/ripgrep.git"},
+    "burntsushi/ripgrep": {"language": "rust", "name": "ripgrep", "url": "https://github.com/BurntSushi/ripgrep.git"},
+    "BurntSushi/ripgrep": {"language": "rust", "name": "ripgrep", "url": "https://github.com/BurntSushi/ripgrep.git"},
+    "clap": {"language": "rust", "name": "clap", "url": "https://github.com/clap-rs/clap.git"},
+    "clap-rs/clap": {"language": "rust", "name": "clap", "url": "https://github.com/clap-rs/clap.git"},
+    # Rust - Held-out
+    "serde": {"language": "rust", "name": "serde", "url": "https://github.com/serde-rs/serde.git"},
+    "serde-rs/serde": {"language": "rust", "name": "serde", "url": "https://github.com/serde-rs/serde.git"},
+}
+
+FALLBACK_REPOS: Dict[str, str] = {
+    "python": "https://github.com/tiangolo/fastapi.git",
+    "typescript": "https://github.com/trpc/trpc.git",
+    "go": "https://github.com/spf13/cobra.git",
+    "rust": "https://github.com/clap-rs/clap.git",
+}
 
 
 # Multi-Language Templates for Synthetic Generation
@@ -1218,7 +1412,7 @@ class DatasetGenerator:
 
         # 1. Mine Revert Commits (real bugs that were reverted)
         try:
-            cmd = ["git", "log", "--grep=revert", "-i", "-n", "30", "--format=%H|%s"]
+            cmd = ["git", "log", "--grep=revert", "-i", "-n", "150", "--format=%H|%s"]
             res = subprocess.run(cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=10)
             if res.returncode == 0 and res.stdout.strip():
                 for line in res.stdout.strip().splitlines():
@@ -1227,36 +1421,74 @@ class DatasetGenerator:
                     rev_hash, subject = line.split("|", 1)
                     if not re.search(r"(?i)\b(revert|reverted|reverting)\b|^revert\b", subject):
                         continue
-                    f_cmd = ["git", "show", "--name-only", "--format=", rev_hash]
-                    f_res = subprocess.run(f_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                    if f_res.returncode != 0:
-                        continue
-                    files = [f.strip() for f in f_res.stdout.splitlines() if f.strip()]
-                    for fname in files:
+
+                    # Retrieve full commit message body to find referenced buggy commit hash
+                    b_msg_cmd = ["git", "show", "-s", "--format=%B", rev_hash]
+                    b_msg_res = subprocess.run(b_msg_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                    commit_body = b_msg_res.stdout if b_msg_res.returncode == 0 else ""
+
+                    rev_match = re.search(
+                        r"(?i)(?:this reverts commit|reverts commit|reverting commit)\s+([0-9a-f]{7,40})",
+                        commit_body,
+                    )
+                    bug_hash = rev_match.group(1) if rev_match else None
+
+                    # If bug_hash found, enrich context with original bug commit body
+                    if bug_hash:
+                        b_ctx_cmd = ["git", "show", "-s", "--format=%B", bug_hash]
+                        b_ctx_res = subprocess.run(b_ctx_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                        if b_ctx_res.returncode == 0 and b_ctx_res.stdout.strip():
+                            commit_body = f"{commit_body}\n{b_ctx_res.stdout}"
+
+                    # If bug_hash found, resolve original buggy commit diffs with base content
+                    files_to_check: List[Tuple[str, str, Optional[str]]] = []  # (fname, diff_text, orig_content)
+                    if bug_hash:
+                        f_cmd = ["git", "show", "--name-only", "--format=", bug_hash]
+                        f_res = subprocess.run(f_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                        if f_res.returncode == 0:
+                            for fn in f_res.stdout.splitlines():
+                                fn = fn.strip()
+                                if fn:
+                                    d_cmd = ["git", "show", "-p", bug_hash, "--", fn]
+                                    d_res = subprocess.run(d_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                                    if d_res.returncode == 0 and d_res.stdout.strip():
+                                        o_cmd = ["git", "show", f"{bug_hash}~1:{fn}"]
+                                        o_res = subprocess.run(o_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                                        orig_c = o_res.stdout if o_res.returncode == 0 else None
+                                        files_to_check.append((fn, d_res.stdout, orig_c))
+
+                    # If original buggy diff was not resolvable via bug_hash, use reverse diff of revert commit
+                    if not files_to_check:
+                        f_cmd = ["git", "show", "--name-only", "--format=", rev_hash]
+                        f_res = subprocess.run(f_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                        if f_res.returncode == 0:
+                            for fn in f_res.stdout.splitlines():
+                                fn = fn.strip()
+                                if fn:
+                                    d_cmd = ["git", "show", "-R", "-p", rev_hash, "--", fn]
+                                    d_res = subprocess.run(d_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                                    if d_res.returncode == 0 and d_res.stdout.strip():
+                                        o_cmd = ["git", "show", f"{rev_hash}:{fn}"]
+                                        o_res = subprocess.run(o_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                                        orig_c = o_res.stdout if o_res.returncode == 0 else None
+                                        files_to_check.append((fn, d_res.stdout, orig_c))
+
+                    for fname, diff_text, orig_content in files_to_check:
                         lang = detect_language(fname)
                         if not lang or lang not in self.languages:
                             continue
-                        d_cmd = ["git", "show", "-p", rev_hash, "--", fname]
-                        d_res = subprocess.run(d_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                        if d_res.returncode != 0 or not d_res.stdout.strip():
-                            continue
-                        diff_text = d_res.stdout
-
-                        # Check if this revert references the original buggy commit
-                        rev_match = re.search(r"This reverts commit ([0-9a-f]{7,40})", diff_text)
-                        if rev_match:
-                            bug_hash = rev_match.group(1)
-                            b_cmd = ["git", "show", "-p", bug_hash, "--", fname]
-                            b_res = subprocess.run(b_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                            if b_res.returncode == 0 and b_res.stdout.strip():
-                                diff_text = b_res.stdout
-
                         try:
-                            rep = engine.verify(fname, diff_text)
+                            rep = engine.verify(fname, diff_text, original_content=orig_content)
                             gate_passed = (rep.status == "APPROVED")
                             if should_filter and not gate_passed:
                                 continue
-                            tax = DatasetRecord._default_taxonomy_for_category(subject, 0, 0.88)
+                            tax = DatasetRecord.assign_taxonomy_labels(
+                                category="real_revert",
+                                label=self.negative_label,
+                                risk_score=0.88,
+                                context_text=f"{subject}\n{commit_body}",
+                                invariant_violations=rep.invariant_violations,
+                            )
                             records.append(
                                 DatasetRecord(
                                     input_dsl=rep.linearized_subgraph,
@@ -1278,9 +1510,9 @@ class DatasetGenerator:
         except Exception:
             pass
 
-        # 2. Mine Hotfix Commits
+        # 2. Mine Hotfix Commits paired with pre-fix buggy state
         try:
-            cmd = ["git", "log", "--grep=fix", "-i", "-n", "30", "--format=%H|%s"]
+            cmd = ["git", "log", "--grep=fix", "-i", "-n", "150", "--format=%H|%s"]
             res = subprocess.run(cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=10)
             if res.returncode == 0 and res.stdout.strip():
                 for line in res.stdout.strip().splitlines():
@@ -1288,10 +1520,16 @@ class DatasetGenerator:
                         continue
                     fix_hash, subject = line.split("|", 1)
                     # Filter out false positives like 'prefix', 'fixture', etc.
-                    if not re.search(r"(?i)\b(fix|hotfix|bugfix|patch)\b|^(fix|hotfix)(\(.*\))?:", subject):
+                    if not re.search(r"(?i)\b(fix|hotfix|bugfix|patch)\b|^(fix|hotfix|bugfix)(\(.*\))?:", subject):
                         continue
                     if re.search(r"(?i)\b(fixture|fixtures|prefix|postfix|suffix)\b", subject) and not re.search(r"(?i)\b(bug|hotfix|fix:)\b", subject):
                         continue
+
+                    # Retrieve full commit message body for taxonomy assignment
+                    b_msg_cmd = ["git", "show", "-s", "--format=%B", fix_hash]
+                    b_msg_res = subprocess.run(b_msg_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                    commit_body = b_msg_res.stdout if b_msg_res.returncode == 0 else ""
+
                     f_cmd = ["git", "show", "--name-only", "--format=", fix_hash]
                     f_res = subprocess.run(f_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
                     if f_res.returncode != 0:
@@ -1301,32 +1539,70 @@ class DatasetGenerator:
                         lang = detect_language(fname)
                         if not lang or lang not in self.languages:
                             continue
+
+                        # a) Positive sample: The hotfix patch itself
                         d_cmd = ["git", "show", "-p", fix_hash, "--", fname]
                         d_res = subprocess.run(d_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                        if d_res.returncode != 0 or not d_res.stdout.strip():
-                            continue
-                        diff_text = d_res.stdout
-                        try:
-                            rep = engine.verify(fname, diff_text)
-                            gate_passed = (rep.status == "APPROVED")
-                            if should_filter and not gate_passed:
-                                continue
-                            records.append(
-                                DatasetRecord(
-                                    input_dsl=rep.linearized_subgraph,
-                                    label=self.positive_label,
-                                    risk_score=random.uniform(0.02, 0.15),
-                                    category="real_hotfix",
-                                    language=lang,
-                                    taxonomy_labels={c: 0.0 for c in TAXONOMY_CLASSES},
-                                    symbolic_gate_passed=gate_passed,
-                                    source_type="real_hotfix",
-                                )
-                            )
-                            if len(records) >= max(2, (max_samples * 2) // 3):
-                                break
-                        except Exception:
-                            continue
+                        if d_res.returncode == 0 and d_res.stdout.strip():
+                            diff_text = d_res.stdout
+                            o_cmd = ["git", "show", f"{fix_hash}~1:{fname}"]
+                            o_res = subprocess.run(o_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                            orig_c = o_res.stdout if o_res.returncode == 0 else None
+                            try:
+                                rep_fix = engine.verify(fname, diff_text, original_content=orig_c)
+                                gate_passed_fix = (rep_fix.status == "APPROVED")
+                                if not should_filter or gate_passed_fix:
+                                    records.append(
+                                        DatasetRecord(
+                                            input_dsl=rep_fix.linearized_subgraph,
+                                            label=self.positive_label,
+                                            risk_score=random.uniform(0.02, 0.15),
+                                            category="real_hotfix",
+                                            language=lang,
+                                            taxonomy_labels={c: 0.0 for c in TAXONOMY_CLASSES},
+                                            symbolic_gate_passed=gate_passed_fix,
+                                            source_type="real_hotfix",
+                                        )
+                                    )
+                            except Exception:
+                                pass
+
+                        # b) Paired negative sample: Pre-fix buggy state (reverse of fix patch)
+                        d_bug_cmd = ["git", "show", "-R", "-p", fix_hash, "--", fname]
+                        d_bug_res = subprocess.run(d_bug_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                        if d_bug_res.returncode == 0 and d_bug_res.stdout.strip():
+                            bug_diff_text = d_bug_res.stdout
+                            o_bug_cmd = ["git", "show", f"{fix_hash}:{fname}"]
+                            o_bug_res = subprocess.run(o_bug_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                            orig_bug_c = o_bug_res.stdout if o_bug_res.returncode == 0 else None
+                            try:
+                                rep_bug = engine.verify(fname, bug_diff_text, original_content=orig_bug_c)
+                                gate_passed_bug = (rep_bug.status == "APPROVED")
+                                if not should_filter or gate_passed_bug:
+                                    tax_bug = DatasetRecord.assign_taxonomy_labels(
+                                        category="real_revert",
+                                        label=self.negative_label,
+                                        risk_score=0.88,
+                                        context_text=f"{subject}\n{commit_body}",
+                                        invariant_violations=rep_bug.invariant_violations,
+                                    )
+                                    records.append(
+                                        DatasetRecord(
+                                            input_dsl=rep_bug.linearized_subgraph,
+                                            label=self.negative_label,
+                                            risk_score=random.uniform(0.85, 0.95),
+                                            category="real_revert",
+                                            language=lang,
+                                            taxonomy_labels=tax_bug,
+                                            symbolic_gate_passed=gate_passed_bug,
+                                            source_type="real_hotfix",
+                                        )
+                                    )
+                            except Exception:
+                                pass
+
+                        if len(records) >= max(2, (max_samples * 2) // 3):
+                            break
                     if len(records) >= max(2, (max_samples * 2) // 3):
                         break
         except Exception:
@@ -1334,7 +1610,7 @@ class DatasetGenerator:
 
         # 3. Mine Clean Merged Commits
         try:
-            cmd = ["git", "log", "--no-merges", "-n", "30", "--format=%H|%s"]
+            cmd = ["git", "log", "--no-merges", "-n", "150", "--format=%H|%s"]
             res = subprocess.run(cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=10)
             if res.returncode == 0 and res.stdout.strip():
                 for line in res.stdout.strip().splitlines():
@@ -1357,8 +1633,11 @@ class DatasetGenerator:
                         if d_res.returncode != 0 or not d_res.stdout.strip():
                             continue
                         diff_text = d_res.stdout
+                        o_cmd = ["git", "show", f"{c_hash}~1:{fname}"]
+                        o_res = subprocess.run(o_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                        orig_c = o_res.stdout if o_res.returncode == 0 else None
                         try:
-                            rep = engine.verify(fname, diff_text)
+                            rep = engine.verify(fname, diff_text, original_content=orig_c)
                             if rep.status == "APPROVED":
                                 records.append(
                                     DatasetRecord(

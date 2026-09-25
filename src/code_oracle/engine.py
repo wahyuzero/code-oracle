@@ -58,6 +58,8 @@ class TopoSliceEngine:
         k: int = 1,
         max_fanout: int = 20,
         taxonomy_threshold: float = 0.5,
+        original_content: Optional[str] = None,
+        is_replacement: bool = False,
     ) -> EnhancedVerificationReport:
         """
         Verify a code patch proposal against AST topology and contract invariants.
@@ -85,6 +87,8 @@ class TopoSliceEngine:
             file_path=norm_path,
             patch_content=patch_content,
             workspace_root=self.workspace_root,
+            original_content=original_content,
+            is_replacement=is_replacement,
         )
 
         # Immediate exit on syntax error
@@ -116,6 +120,13 @@ class TopoSliceEngine:
         backup_imps = list(self.indexer._file_imports.get(norm_path, []))
 
         try:
+            # If historical base content is provided, initialize base symbols from it
+            if original_content is not None:
+                orig_symbols = extract_symbols_from_ast(original_content, file_path=norm_path)
+                orig_imports = extract_imports_from_ast(original_content, file_path=norm_path)
+                self.indexer._file_symbols[norm_path] = orig_symbols
+                self.indexer._file_imports[norm_path] = orig_imports
+
             # In-memory overlay of transient patched symbols and imports
             if patch_result.all_patched_symbols or patch_result.deleted_symbols or patch_result.imports:
                 self.indexer.overlay_transient_symbols(
