@@ -109,6 +109,8 @@ Code Oracle automatically downloads and caches these weights to `~/.cache/code_o
 - [x] Synthetic mutation and training dataset mining engine (`tools/mine_top_repos.py`)
 - [x] Google Colab Multi-Language Fine-Tuning Pipeline (`notebooks/Laya_Code_Oracle_Finetune.ipynb`)
 - [x] CPU Thread Auto-Tuning & Hybrid Neuro-Symbolic Latency Optimization
+- [ ] **High-Priority:** Dead Code & Orphan Symbol Scanner (`code-oracle dead-code` via 0-in-degree graph topology)
+- [ ] **High-Priority:** Static Performance Anti-Patterns & Resource Leak Detector (`code-oracle perf-lint`: nested loop complexity, unclosed handles)
 - [ ] Official Git Tagging & GitHub Release pipeline (`v0.1.0`)
 - [ ] Python Package Wheel Distribution & PyPI Publishing (`pip install code-oracle`)
 - [ ] Multi-Agent Ecosystem Integrations (Claude Code, Cursor, Antigravity, OpenCode, and Cline sidecars)
