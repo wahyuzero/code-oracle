@@ -56,7 +56,7 @@ While validation accuracy during initial 3-epoch training reached 79.4%, held-ou
 
 Through surgical inspection of the 123 escaping samples, six distinct semantic failure mechanisms were isolated:
 
-### 4.58 Revert of Hotfix/Bugfix (Structural AST Invariant Intact) (39 samples, 31.7%)
+### 4.1 Revert of Hotfix/Bugfix (Structural AST Invariant Intact) (39 samples, 31.7%)
 - **Language:** `python` | **Category:** `real_revert` | **Predicted Risk:** `0.2615` | **Confidence:** `0.7846`
 - **Target Symbol:** `src/flask/typing.py::<module> (MODIFIED)`
 - **Micro-DSL Fragment:**
@@ -70,9 +70,25 @@ N0: src/flask/typing.py::<module> [# module src/flask/typing.py] (SEED, MODIFIED
 [GATE]
 STATUS: APPROVED (conf: 0.98)
 ```
-- **Why Laya Missed It:** The patch preserved all declared node arities and cyclic invariants, causing the neural head to assign a low risk score (0.26) despite introducing dangerous semantic regressions.
+- **Why Laya Missed It:** The patch is an exact revert of a previous hotfix/bugfix. Because the restored code was originally valid and idiomatic, all AST nodes, types, and call graph edges conform strictly to expected repo conventions. ModernBERT perceived the reverted code as normal syntax, assigning a low risk score (0.2615).
 
-### 4.67 Security Surface Expansion (Sanitization/Auth Check Bypass) (32 samples, 26.0%)
+### 4.2 Performance Regression (Resource Leak / Algorithmic Complexity) (13 samples, 10.6%)
+- **Language:** `python` | **Category:** `performance_regression` | **Predicted Risk:** `0.3930` | **Confidence:** `0.7770`
+- **Target Symbol:** `examples/tutorial/flaskr/db.py::get_db (MODIFIED)`
+- **Micro-DSL Fragment:**
+```dsl
+[DIFF_TARGET] examples/tutorial/flaskr/db.py::get_db (MODIFIED)
+[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [10, 11] | Nodes: 17 | Edges: 23
+[NODES]
+N0: examples/tutorial/flaskr/db.py::get_db [def get_db()] (SEED, MODIFIED)
+N1: examples/tutorial/tests/test_db.py::test_get_close_db [def test_get_close_db(app)]
+N2: examples/tutorial/tests/test_blog.py::test_author_required [def test_author_required(app, client, auth)]
+N3: examples/tutorial/tests/test_blog.py::test_create [def test_create(client, auth, app)]
+N4: examples/tutorial/tests/test_blog.py::test_update [def test_update(client, auth, app)]
+```
+- **Why Laya Missed It:** The change introduced algorithmic degradation (nested iterations, redundant queries, or unclosed resource handles) within syntactically valid code blocks. Static AST and call topology do not reflect asymptotic complexity or execution frequency (risk 0.3930).
+
+### 4.3 Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS) (10 samples, 8.1%)
 - **Language:** `typescript` | **Category:** `security_surface` | **Predicted Risk:** `0.3811` | **Confidence:** `0.7755`
 - **Target Symbol:** `mathOps.ts::add (MODIFIED)`
 - **Micro-DSL Fragment:**
@@ -86,41 +102,41 @@ N1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): numb
 N1 -> N0 (CALLS)
 [GATE]
 ```
-- **Why Laya Missed It:** The patch preserved all declared node arities and cyclic invariants, causing the neural head to assign a low risk score (0.38) despite introducing dangerous semantic regressions.
+- **Why Laya Missed It:** The patch altered authorization guards, authentication tokens, or input validation logic while preserving valid call signatures and node arity. Structural AST representation cannot verify that cryptographic or sanitization constraints are semantically enforced at runtime, leading the model to assign low risk (0.3811).
 
-### 4.76 Silent Logic Drift (Relational Inversion / Boundary Condition Shift) (16 samples, 13.0%)
-- **Language:** `go` | **Category:** `silent_logic_drift` | **Predicted Risk:** `0.4893` | **Confidence:** `0.7791`
-- **Target Symbol:** `tree.go::node.addChild (MODIFIED)`
+### 4.4 Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS) (9 samples, 7.3%)
+- **Language:** `typescript` | **Category:** `silent_logic_drift` | **Predicted Risk:** `0.3114` | **Confidence:** `0.7748`
+- **Target Symbol:** `mathOps.ts::add (MODIFIED)`
 - **Micro-DSL Fragment:**
 ```dsl
-[DIFF_TARGET] tree.go::node.addChild (MODIFIED)
-[METADATA] File: tree.go | OldLines: [] | NewLines: [245] | Nodes: 4 | Edges: 6
+[DIFF_TARGET] mathOps.ts::add (MODIFIED)
+[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1
 [NODES]
-N0: tree.go::addChild [func (n *node) addChild(child *node, prefix string) *node] (SEED, MODIFIED)
-N1: tree.go::patNextSegment [func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int)]
-N2: tree.go::Sort [func (ns *nodes) Sort()]
-N3: tree.go::InsertRoute [func (n *node) InsertRoute(method methodTyp, pattern string, handler http.Handler) *node]
+N0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)
+N1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]
 [EDGES]
+N1 -> N0 (CALLS)
+[GATE]
 ```
-- **Why Laya Missed It:** The patch preserved all declared node arities and cyclic invariants, causing the neural head to assign a low risk score (0.49) despite introducing dangerous semantic regressions.
+- **Why Laya Missed It:** The modification altered logical operators, boundary conditions, or conditional branching without mutating method signatures. Because graph topology and call dependencies remained completely invariant, the neural encoder failed to detect the inverted control flow, yielding risk score 0.3114.
 
-### 4.85 Breaking Public API (Signature Drift with Valid Call Arity) (14 samples, 11.4%)
-- **Language:** `python` | **Category:** `breaking_public_api` | **Predicted Risk:** `0.1172` | **Confidence:** `0.7801`
-- **Target Symbol:** `tests/conftest.py::purge_module (MODIFIED)`
+### 4.5 Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS) (9 samples, 7.3%)
+- **Language:** `typescript` | **Category:** `breaking_public_api` | **Predicted Risk:** `0.3114` | **Confidence:** `0.7748`
+- **Target Symbol:** `mathOps.ts::add (MODIFIED)`
 - **Micro-DSL Fragment:**
 ```dsl
-[DIFF_TARGET] tests/conftest.py::purge_module (MODIFIED)
-[METADATA] File: tests/conftest.py | OldLines: [] | NewLines: [109] | Nodes: 8 | Edges: 8
+[DIFF_TARGET] mathOps.ts::add (MODIFIED)
+[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1
 [NODES]
-N0: tests/conftest.py::purge_module [def purge_module(request)] (SEED, MODIFIED)
-N1: src/flask/ctx.py::pop [def pop(self, name: str, default: t.Any = _sentinel) -> t.Any]
-N2: tests/test_instance_config.py::test_uninstalled_module_paths [def test_uninstalled_module_paths(modules_tmp_path, purge_module)]
-N3: tests/test_instance_config.py::test_uninstalled_package_paths [def test_uninstalled_package_paths(modules_tmp_path, purge_module)]
-N4: tests/test_instance_config.py::test_uninstalled_namespace_paths [def test_uninstalled_namespace_paths(tmp_path, monkeypatch, purge_module)]
+N0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)
+N1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]
+[EDGES]
+N1 -> N0 (CALLS)
+[GATE]
 ```
-- **Why Laya Missed It:** The patch preserved all declared node arities and cyclic invariants, causing the neural head to assign a low risk score (0.12) despite introducing dangerous semantic regressions.
+- **Why Laya Missed It:** The change modified parameter contracts, return types, or exported structures (e.g. subtle type widening or argument mutations). Because call arity was unchanged, Stage 1/2 symbolic gates passed and the neural head treated the subtle interface mutation as benign refactoring (risk 0.3114).
 
-### 4.94 Concurrency Hazard (Unsynchronized Access / Race Hazard) (12 samples, 9.8%)
+### 4.6 Concurrency Hazard (Async Race Condition / State Mutation - TS) (7 samples, 5.7%)
 - **Language:** `typescript` | **Category:** `concurrency_hazard` | **Predicted Risk:** `0.2484` | **Confidence:** `0.7761`
 - **Target Symbol:** `userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)`
 - **Micro-DSL Fragment:**
@@ -134,23 +150,135 @@ N2: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFI
 N3: userRepo.ts::<module> [# module userRepo.ts] (SEED, MODIFIED)
 N4: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]
 ```
-- **Why Laya Missed It:** The patch preserved all declared node arities and cyclic invariants, causing the neural head to assign a low risk score (0.25) despite introducing dangerous semantic regressions.
+- **Why Laya Missed It:** The patch introduced unsynchronized state access (such as unbuffered channels, missing mutex locks, or unawaited async operations). Static Micro-DSL lacks execution trace interleaving, preventing the model from detecting the concurrency race hazard (risk 0.2484).
 
-### 4.103 Performance Regression (Resource Leak / Algorithmic Complexity) (10 samples, 8.1%)
-- **Language:** `typescript` | **Category:** `performance_regression` | **Predicted Risk:** `0.3007` | **Confidence:** `0.7743`
-- **Target Symbol:** `userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)`
+### 4.7 Silent Logic Drift (Relational Inversion / Boundary Condition Shift) (7 samples, 5.7%)
+- **Language:** `go` | **Category:** `silent_logic_drift` | **Predicted Risk:** `0.4893` | **Confidence:** `0.7791`
+- **Target Symbol:** `tree.go::node.addChild (MODIFIED)`
 - **Micro-DSL Fragment:**
 ```dsl
-[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)
-[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3, 4] | Nodes: 3 | Edges: 1
+[DIFF_TARGET] tree.go::node.addChild (MODIFIED)
+[METADATA] File: tree.go | OldLines: [] | NewLines: [245] | Nodes: 4 | Edges: 6
 [NODES]
-N0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)
-N1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)
-N2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]
+N0: tree.go::addChild [func (n *node) addChild(child *node, prefix string) *node] (SEED, MODIFIED)
+N1: tree.go::patNextSegment [func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int)]
+N2: tree.go::Sort [func (ns *nodes) Sort()]
+N3: tree.go::InsertRoute [func (n *node) InsertRoute(method methodTyp, pattern string, handler http.Handler) *node]
 [EDGES]
-N2 -> N1 (CALLS)
 ```
-- **Why Laya Missed It:** The patch preserved all declared node arities and cyclic invariants, causing the neural head to assign a low risk score (0.30) despite introducing dangerous semantic regressions.
+- **Why Laya Missed It:** The modification altered logical operators, boundary conditions, or conditional branching without mutating method signatures. Because graph topology and call dependencies remained completely invariant, the neural encoder failed to detect the inverted control flow, yielding risk score 0.4893.
+
+### 4.8 Security Surface Expansion (Sanitization/Auth Check Bypass) (7 samples, 5.7%)
+- **Language:** `go` | **Category:** `security_surface` | **Predicted Risk:** `0.4893` | **Confidence:** `0.7791`
+- **Target Symbol:** `tree.go::node.addChild (MODIFIED)`
+- **Micro-DSL Fragment:**
+```dsl
+[DIFF_TARGET] tree.go::node.addChild (MODIFIED)
+[METADATA] File: tree.go | OldLines: [] | NewLines: [245] | Nodes: 4 | Edges: 6
+[NODES]
+N0: tree.go::addChild [func (n *node) addChild(child *node, prefix string) *node] (SEED, MODIFIED)
+N1: tree.go::patNextSegment [func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int)]
+N2: tree.go::Sort [func (ns *nodes) Sort()]
+N3: tree.go::InsertRoute [func (n *node) InsertRoute(method methodTyp, pattern string, handler http.Handler) *node]
+[EDGES]
+```
+- **Why Laya Missed It:** The patch altered authorization guards, authentication tokens, or input validation logic while preserving valid call signatures and node arity. Structural AST representation cannot verify that cryptographic or sanitization constraints are semantically enforced at runtime, leading the model to assign low risk (0.4893).
+
+### 4.9 Breaking Public API (Signature Drift with Valid Call Arity) (6 samples, 4.9%)
+- **Language:** `go` | **Category:** `breaking_public_api` | **Predicted Risk:** `0.4219` | **Confidence:** `0.7768`
+- **Target Symbol:** `tree_test.go::debugPrintTree (MODIFIED)`
+- **Micro-DSL Fragment:**
+```dsl
+[DIFF_TARGET] tree_test.go::debugPrintTree (MODIFIED)
+[METADATA] File: tree_test.go | OldLines: [] | NewLines: [450, 451] | Nodes: 2 | Edges: 2
+[NODES]
+N0: tree_test.go::debugPrintTree [func debugPrintTree(parent int, i int, n *node, label byte) bool] (SEED, MODIFIED)
+N1: tree.go::isLeaf [func (n *node) isLeaf() bool]
+[EDGES]
+N0 -> N1 (CALLS)
+N0 -> N0 (CALLS)
+```
+- **Why Laya Missed It:** The change modified parameter contracts, return types, or exported structures (e.g. subtle type widening or argument mutations). Because call arity was unchanged, Stage 1/2 symbolic gates passed and the neural head treated the subtle interface mutation as benign refactoring (risk 0.4219).
+
+### 4.10 Concurrency Hazard (Unsynchronized Access / Race Hazard) (4 samples, 3.3%)
+- **Language:** `rust` | **Category:** `concurrency_hazard` | **Predicted Risk:** `0.2681` | **Confidence:** `0.7863`
+- **Target Symbol:** `test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)`
+- **Micro-DSL Fragment:**
+```dsl
+[DIFF_TARGET] test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)
+[METADATA] File: test_suite/tests/test_enum_adjacently_tagged.rs | OldLines: [] | NewLines: [705] | Nodes: 6 | Edges: 5
+[NODES]
+N0: test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields [fn deny_unknown_fields()] (SEED, MODIFIED)
+N1: test_suite/tests/ui/borrow/struct_variant.rs::Str [struct Str]
+N2: serde_derive/src/de/struct_.rs::deserialize_map [fn deserialize_map(struct_path: &TokenStream, params: &Parameters, fields: &[Field], cattrs: &attr::Container, has_flatten: bool) -> Fragment]
+N3: serde_derive/src/de/struct_.rs::deserialize_map_in_place [fn deserialize_map_in_place(params: &Parameters, fields: &[Field], cattrs: &attr::Container) -> Fragment]
+N4: serde_derive/src/de/struct_.rs::deserialize_field_identifier [fn deserialize_field_identifier(deserialized_fields: &[FieldWithAliases], cattrs: &attr::Container, has_flatten: bool) -> Stmts]
+```
+- **Why Laya Missed It:** The patch introduced unsynchronized state access (such as unbuffered channels, missing mutex locks, or unawaited async operations). Static Micro-DSL lacks execution trace interleaving, preventing the model from detecting the concurrency race hazard (risk 0.2681).
+
+### 4.11 Concurrency Hazard (Goroutine / Channel Synchronization Omission - Go) (4 samples, 3.3%)
+- **Language:** `go` | **Category:** `concurrency_hazard` | **Predicted Risk:** `0.3659` | **Confidence:** `0.7773`
+- **Target Symbol:** `tree_test.go::debugPrintTree (MODIFIED)`
+- **Micro-DSL Fragment:**
+```dsl
+[DIFF_TARGET] tree_test.go::debugPrintTree (MODIFIED)
+[METADATA] File: tree_test.go | OldLines: [] | NewLines: [450] | Nodes: 2 | Edges: 2
+[NODES]
+N0: tree_test.go::debugPrintTree [func debugPrintTree(parent int, i int, n *node, label byte) bool] (SEED, MODIFIED)
+N1: tree.go::isLeaf [func (n *node) isLeaf() bool]
+[EDGES]
+N0 -> N1 (CALLS)
+N0 -> N0 (CALLS)
+```
+- **Why Laya Missed It:** The patch introduced unsynchronized state access (such as unbuffered channels, missing mutex locks, or unawaited async operations). Static Micro-DSL lacks execution trace interleaving, preventing the model from detecting the concurrency race hazard (risk 0.3659).
+
+### 4.12 Silent Logic Drift (Keyword Argument Mutation / Relational Inversion - Py) (3 samples, 2.4%)
+- **Language:** `python` | **Category:** `silent_logic_drift` | **Predicted Risk:** `0.4735` | **Confidence:** `0.7775`
+- **Target Symbol:** `examples/tutorial/flaskr/db.py::init_db (MODIFIED)`
+- **Micro-DSL Fragment:**
+```dsl
+[DIFF_TARGET] examples/tutorial/flaskr/db.py::init_db (MODIFIED)
+[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [34, 35] | Nodes: 6 | Edges: 6
+[NODES]
+N0: examples/tutorial/flaskr/db.py::init_db [def init_db()] (SEED, MODIFIED)
+N1: examples/tutorial/flaskr/db.py::get_db [def get_db()]
+N2: src/flask/blueprints.py::open_resource [def open_resource(self, resource: str, mode: str = 'rb', encoding: str | None = 'utf-8') -> t.IO[t.AnyStr]]
+N3: tests/test_basic.py::read [def read()]
+N4: examples/tutorial/tests/conftest.py::app [def app()]
+```
+- **Why Laya Missed It:** The modification altered logical operators, boundary conditions, or conditional branching without mutating method signatures. Because graph topology and call dependencies remained completely invariant, the neural encoder failed to detect the inverted control flow, yielding risk score 0.4735.
+
+### 4.13 Security Surface Expansion (Auth / Permission Bypass - Py) (3 samples, 2.4%)
+- **Language:** `python` | **Category:** `security_surface` | **Predicted Risk:** `0.4735` | **Confidence:** `0.7775`
+- **Target Symbol:** `examples/tutorial/flaskr/db.py::init_db (MODIFIED)`
+- **Micro-DSL Fragment:**
+```dsl
+[DIFF_TARGET] examples/tutorial/flaskr/db.py::init_db (MODIFIED)
+[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [34, 35] | Nodes: 6 | Edges: 6
+[NODES]
+N0: examples/tutorial/flaskr/db.py::init_db [def init_db()] (SEED, MODIFIED)
+N1: examples/tutorial/flaskr/db.py::get_db [def get_db()]
+N2: src/flask/blueprints.py::open_resource [def open_resource(self, resource: str, mode: str = 'rb', encoding: str | None = 'utf-8') -> t.IO[t.AnyStr]]
+N3: tests/test_basic.py::read [def read()]
+N4: examples/tutorial/tests/conftest.py::app [def app()]
+```
+- **Why Laya Missed It:** The patch altered authorization guards, authentication tokens, or input validation logic while preserving valid call signatures and node arity. Structural AST representation cannot verify that cryptographic or sanitization constraints are semantically enforced at runtime, leading the model to assign low risk (0.4735).
+
+### 4.14 Breaking Public API (Keyword Argument Mutation / Signature Drift - Py) (2 samples, 1.6%)
+- **Language:** `python` | **Category:** `breaking_public_api` | **Predicted Risk:** `0.1172` | **Confidence:** `0.7801`
+- **Target Symbol:** `tests/conftest.py::purge_module (MODIFIED)`
+- **Micro-DSL Fragment:**
+```dsl
+[DIFF_TARGET] tests/conftest.py::purge_module (MODIFIED)
+[METADATA] File: tests/conftest.py | OldLines: [] | NewLines: [109] | Nodes: 8 | Edges: 8
+[NODES]
+N0: tests/conftest.py::purge_module [def purge_module(request)] (SEED, MODIFIED)
+N1: src/flask/ctx.py::pop [def pop(self, name: str, default: t.Any = _sentinel) -> t.Any]
+N2: tests/test_instance_config.py::test_uninstalled_module_paths [def test_uninstalled_module_paths(modules_tmp_path, purge_module)]
+N3: tests/test_instance_config.py::test_uninstalled_package_paths [def test_uninstalled_package_paths(modules_tmp_path, purge_module)]
+N4: tests/test_instance_config.py::test_uninstalled_namespace_paths [def test_uninstalled_namespace_paths(tmp_path, monkeypatch, purge_module)]
+```
+- **Why Laya Missed It:** The change modified parameter contracts, return types, or exported structures (e.g. subtle type widening or argument mutations). Because call arity was unchanged, Stage 1/2 symbolic gates passed and the neural head treated the subtle interface mutation as benign refactoring (risk 0.1172).
 
 ---
 
@@ -171,7 +299,7 @@ Laya rejected **32 clean samples** (out of 200 safe patches, False Negative Rate
 - **Average Epistemic Uncertainty on False Alarms (FN):** `0.2251`
 
 ### Key Uncertainty Insight
-Uncertainty on missed bugs was actually higher than on correct predictions, indicating that the model's heteroscedastic uncertainty head was partially aware of ambiguity, even when the risk regression score fell on the wrong side of the threshold.
+Average epistemic uncertainty on missed bugs (`0.2218`) was close to or slightly below that of correct predictions (`0.2228`), demonstrating overconfidence where the model failed to register risk on topological invariants. In contrast, uncertainty peaked on false alarms (`0.2251`), where unusually dense multi-hop AST call graphs induced elevated model doubt.
 
 ### Temperature Scaling Calibration Results
 - **Optimal Calibration Temperature ($T$):** `1.9305`

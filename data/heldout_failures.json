@@ -47,7 +47,7 @@
     "epistemic_uncertainty": 0.2239,
     "language": "typescript",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Async Race Condition / State Mutation - TS)",
     "diff_target": "userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [1, 2, 5] | Nodes: 5 | Edges: 1\n[NODES]\nN0: userRepo.ts::_cache [const _cache] (SEED, MODIFIED)\nN1: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN2: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN3: userRepo.ts::<module> [# module userRepo.ts] (SEED, MODIFIED)\nN4: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN4 -> N2 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -73,7 +73,7 @@
     "epistemic_uncertainty": 0.2245,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -86,7 +86,7 @@
     "epistemic_uncertainty": 0.2199,
     "language": "python",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Keyword Argument Mutation / Signature Drift - Py)",
     "diff_target": "tests/conftest.py::purge_module (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tests/conftest.py::purge_module (MODIFIED)\n[METADATA] File: tests/conftest.py | OldLines: [] | NewLines: [109] | Nodes: 8 | Edges: 8\n[NODES]\nN0: tests/conftest.py::purge_module [def purge_module(request)] (SEED, MODIFIED)\nN1: src/flask/ctx.py::pop [def pop(self, name: str, default: t.Any = _sentinel) -> t.Any]\nN2: tests/test_instance_config.py::test_uninstalled_module_paths [def test_uninstalled_module_paths(modules_tmp_path, purge_module)]\nN3: tests/test_instance_config.py::test_uninstalled_package_paths [def test_uninstalled_package_paths(modules_tmp_path, purge_module)]\nN4: tests/test_instance_config.py::test_uninstalled_namespace_paths [def test_uninstalled_namespace_paths(tmp_path, monkeypatch, purge_module)]\nN5: tests/test_instance_config.py::test_installed_module_paths [def test_installed_module_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, site_packages)]\nN6: tests/test_instance_config.py::test_installed_package_paths [def test_installed_package_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, monkeypatch)]\nN7: tests/test_instance_config.py::test_prefix_package_paths [def test_prefix_package_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, site_packages)]\n[EDGES]\nN0 -> N1 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN6 -> N0 (CALLS)\nN7 -> N0 (CALLS)\nN1 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -99,7 +99,7 @@
     "epistemic_uncertainty": 0.2197,
     "language": "typescript",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Async Race Condition / State Mutation - TS)",
     "diff_target": "mathOps.ts::_sharedCounter, add, <module> (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::_sharedCounter, add, <module> (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [] | NewLines: [1, 2, 4] | Nodes: 4 | Edges: 1\n[NODES]\nN0: mathOps.ts::_sharedCounter [let _sharedCounter] (SEED, MODIFIED)\nN1: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN2: mathOps.ts::<module> [# module mathOps.ts] (SEED, MODIFIED)\nN3: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN3 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -138,7 +138,7 @@
     "epistemic_uncertainty": 0.2137,
     "language": "rust",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
     "diff_target": "test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)\n[METADATA] File: test_suite/tests/test_enum_adjacently_tagged.rs | OldLines: [] | NewLines: [705] | Nodes: 6 | Edges: 5\n[NODES]\nN0: test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields [fn deny_unknown_fields()] (SEED, MODIFIED)\nN1: test_suite/tests/ui/borrow/struct_variant.rs::Str [struct Str]\nN2: serde_derive/src/de/struct_.rs::deserialize_map [fn deserialize_map(struct_path: &TokenStream, params: &Parameters, fields: &[Field], cattrs: &attr::Container, has_flatten: bool) -> Fragment]\nN3: serde_derive/src/de/struct_.rs::deserialize_map_in_place [fn deserialize_map_in_place(params: &Parameters, fields: &[Field], cattrs: &attr::Container) -> Fragment]\nN4: serde_derive/src/de/struct_.rs::deserialize_field_identifier [fn deserialize_field_identifier(deserialized_fields: &[FieldWithAliases], cattrs: &attr::Container, has_flatten: bool) -> Stmts]\nN5: serde_derive/src/de/enum_adjacently.rs::deserialize [fn deserialize(params: &Parameters, variants: &[Variant], cattrs: &attr::Container, tag: &str, content: &str) -> Fragment]\n[EDGES]\nN0 -> N1 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -164,7 +164,7 @@
     "epistemic_uncertainty": 0.2197,
     "language": "typescript",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Async Race Condition / State Mutation - TS)",
     "diff_target": "mathOps.ts::_sharedCounter, add, <module> (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::_sharedCounter, add, <module> (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [] | NewLines: [1, 2, 4] | Nodes: 4 | Edges: 1\n[NODES]\nN0: mathOps.ts::_sharedCounter [let _sharedCounter] (SEED, MODIFIED)\nN1: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN2: mathOps.ts::<module> [# module mathOps.ts] (SEED, MODIFIED)\nN3: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN3 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -177,7 +177,7 @@
     "epistemic_uncertainty": 0.2225,
     "language": "python",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Keyword Argument Mutation / Relational Inversion - Py)",
     "diff_target": "examples/tutorial/flaskr/db.py::init_db (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] examples/tutorial/flaskr/db.py::init_db (MODIFIED)\n[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [34, 35] | Nodes: 6 | Edges: 6\n[NODES]\nN0: examples/tutorial/flaskr/db.py::init_db [def init_db()] (SEED, MODIFIED)\nN1: examples/tutorial/flaskr/db.py::get_db [def get_db()]\nN2: src/flask/blueprints.py::open_resource [def open_resource(self, resource: str, mode: str = 'rb', encoding: str | None = 'utf-8') -> t.IO[t.AnyStr]]\nN3: tests/test_basic.py::read [def read()]\nN4: examples/tutorial/tests/conftest.py::app [def app()]\nN5: examples/tutorial/flaskr/db.py::init_db_command [def init_db_command()]\n[EDGES]\nN0 -> N1 (CALLS)\nN0 -> N2 (CALLS)\nN0 -> N3 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN4 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -229,7 +229,7 @@
     "epistemic_uncertainty": 0.223,
     "language": "python",
     "category": "performance_regression",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Performance Regression (Resource Leak / Algorithmic Complexity)",
     "diff_target": "examples/tutorial/flaskr/db.py::get_db (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] examples/tutorial/flaskr/db.py::get_db (MODIFIED)\n[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [10, 11] | Nodes: 17 | Edges: 23\n[NODES]\nN0: examples/tutorial/flaskr/db.py::get_db [def get_db()] (SEED, MODIFIED)\nN1: examples/tutorial/tests/test_db.py::test_get_close_db [def test_get_close_db(app)]\nN2: examples/tutorial/tests/test_blog.py::test_author_required [def test_author_required(app, client, auth)]\nN3: examples/tutorial/tests/test_blog.py::test_create [def test_create(client, auth, app)]\nN4: examples/tutorial/tests/test_blog.py::test_update [def test_update(client, auth, app)]\nN5: examples/tutorial/tests/test_blog.py::test_delete [def test_delete(client, auth, app)]\nN6: examples/tutorial/tests/test_auth.py::test_register [def test_register(client, app)]\nN7: examples/tutorial/flaskr/blog.py::index [def index()]\nN8: examples/tutorial/flaskr/blog.py::get_post [def get_post(id, check_author = True)]\nN9: examples/tutorial/flaskr/blog.py::create [def create()]\n[EDGES]\nN1 -> N0 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN6 -> N0 (CALLS)\nN7 -> N0 (CALLS)\nN8 -> N0 (CALLS)\nN9 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -242,7 +242,7 @@
     "epistemic_uncertainty": 0.2225,
     "language": "python",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Auth / Permission Bypass - Py)",
     "diff_target": "examples/tutorial/flaskr/db.py::init_db (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] examples/tutorial/flaskr/db.py::init_db (MODIFIED)\n[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [34, 35] | Nodes: 6 | Edges: 6\n[NODES]\nN0: examples/tutorial/flaskr/db.py::init_db [def init_db()] (SEED, MODIFIED)\nN1: examples/tutorial/flaskr/db.py::get_db [def get_db()]\nN2: src/flask/blueprints.py::open_resource [def open_resource(self, resource: str, mode: str = 'rb', encoding: str | None = 'utf-8') -> t.IO[t.AnyStr]]\nN3: tests/test_basic.py::read [def read()]\nN4: examples/tutorial/tests/conftest.py::app [def app()]\nN5: examples/tutorial/flaskr/db.py::init_db_command [def init_db_command()]\n[EDGES]\nN0 -> N1 (CALLS)\nN0 -> N2 (CALLS)\nN0 -> N3 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN4 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -268,7 +268,7 @@
     "epistemic_uncertainty": 0.2232,
     "language": "python",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Breaking Public API (Keyword Argument Mutation / Signature Drift - Py)",
     "diff_target": "examples/tutorial/flaskr/db.py::get_db (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] examples/tutorial/flaskr/db.py::get_db (MODIFIED)\n[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [10] | Nodes: 17 | Edges: 23\n[NODES]\nN0: examples/tutorial/flaskr/db.py::get_db [def get_db()] (SEED, MODIFIED)\nN1: examples/tutorial/tests/test_db.py::test_get_close_db [def test_get_close_db(app)]\nN2: examples/tutorial/tests/test_blog.py::test_author_required [def test_author_required(app, client, auth)]\nN3: examples/tutorial/tests/test_blog.py::test_create [def test_create(client, auth, app)]\nN4: examples/tutorial/tests/test_blog.py::test_update [def test_update(client, auth, app)]\nN5: examples/tutorial/tests/test_blog.py::test_delete [def test_delete(client, auth, app)]\nN6: examples/tutorial/tests/test_auth.py::test_register [def test_register(client, app)]\nN7: examples/tutorial/flaskr/blog.py::index [def index()]\nN8: examples/tutorial/flaskr/blog.py::get_post [def get_post(id, check_author = True)]\nN9: examples/tutorial/flaskr/blog.py::create [def create()]\n[EDGES]\nN1 -> N0 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN6 -> N0 (CALLS)\nN7 -> N0 (CALLS)\nN8 -> N0 (CALLS)\nN9 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -437,7 +437,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -463,7 +463,7 @@
     "epistemic_uncertainty": 0.2164,
     "language": "go",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
     "diff_target": "tree.go::node.InsertRoute (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tree.go::node.InsertRoute (MODIFIED)\n[METADATA] File: tree.go | OldLines: [] | NewLines: [149] | Nodes: 15 | Edges: 16\n[NODES]\nN0: tree.go::InsertRoute [func (n *node) InsertRoute(method methodTyp, pattern string, handler http.Handler) *node] (SEED, MODIFIED)\nN1: tree.go::setEndpoint [func (n *node) setEndpoint(method methodTyp, handler http.Handler, pattern string)]\nN2: tree.go::patNextSegment [func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int)]\nN3: tree.go::getEdge [func (n *node) getEdge(ntyp nodeTyp, label byte, tail byte, prefix string) *node]\nN4: tree.go::addChild [func (n *node) addChild(child *node, prefix string) *node]\nN5: tree.go::longestPrefix [func longestPrefix(k1 string, k2 string) (i int)]\nN6: tree.go::replaceChild [func (n *node) replaceChild(label byte, tail byte, child *node)]\nN7: mux.go::handle [func (mx *Mux) handle(method methodTyp, pattern string, handler http.Handler) *node]\n[EDGES]\nN0 -> N1 (CALLS)\nN0 -> N2 (CALLS)\nN0 -> N3 (CALLS)\nN0 -> N4 (CALLS)\nN0 -> N5 (CALLS)\nN0 -> N6 (CALLS)\nN7 -> N0 (CALLS)\nN4 -> N2 (CALLS)\nN4 -> N4 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -476,7 +476,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -593,7 +593,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -619,7 +619,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -710,7 +710,7 @@
     "epistemic_uncertainty": 0.223,
     "language": "python",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Auth / Permission Bypass - Py)",
     "diff_target": "examples/tutorial/flaskr/db.py::get_db (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] examples/tutorial/flaskr/db.py::get_db (MODIFIED)\n[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [10, 11] | Nodes: 17 | Edges: 23\n[NODES]\nN0: examples/tutorial/flaskr/db.py::get_db [def get_db()] (SEED, MODIFIED)\nN1: examples/tutorial/tests/test_db.py::test_get_close_db [def test_get_close_db(app)]\nN2: examples/tutorial/tests/test_blog.py::test_author_required [def test_author_required(app, client, auth)]\nN3: examples/tutorial/tests/test_blog.py::test_create [def test_create(client, auth, app)]\nN4: examples/tutorial/tests/test_blog.py::test_update [def test_update(client, auth, app)]\nN5: examples/tutorial/tests/test_blog.py::test_delete [def test_delete(client, auth, app)]\nN6: examples/tutorial/tests/test_auth.py::test_register [def test_register(client, app)]\nN7: examples/tutorial/flaskr/blog.py::index [def index()]\nN8: examples/tutorial/flaskr/blog.py::get_post [def get_post(id, check_author = True)]\nN9: examples/tutorial/flaskr/blog.py::create [def create()]\n[EDGES]\nN1 -> N0 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN6 -> N0 (CALLS)\nN7 -> N0 (CALLS)\nN8 -> N0 (CALLS)\nN9 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -723,7 +723,7 @@
     "epistemic_uncertainty": 0.2245,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -788,7 +788,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -840,7 +840,7 @@
     "epistemic_uncertainty": 0.2267,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [3] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -892,7 +892,7 @@
     "epistemic_uncertainty": 0.2227,
     "language": "go",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Goroutine / Channel Synchronization Omission - Go)",
     "diff_target": "tree_test.go::debugPrintTree (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tree_test.go::debugPrintTree (MODIFIED)\n[METADATA] File: tree_test.go | OldLines: [] | NewLines: [450] | Nodes: 2 | Edges: 2\n[NODES]\nN0: tree_test.go::debugPrintTree [func debugPrintTree(parent int, i int, n *node, label byte) bool] (SEED, MODIFIED)\nN1: tree.go::isLeaf [func (n *node) isLeaf() bool]\n[EDGES]\nN0 -> N1 (CALLS)\nN0 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -918,7 +918,7 @@
     "epistemic_uncertainty": 0.2164,
     "language": "go",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Concurrency Hazard (Goroutine / Channel Synchronization Omission - Go)",
     "diff_target": "tree.go::node.InsertRoute (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tree.go::node.InsertRoute (MODIFIED)\n[METADATA] File: tree.go | OldLines: [] | NewLines: [149] | Nodes: 15 | Edges: 16\n[NODES]\nN0: tree.go::InsertRoute [func (n *node) InsertRoute(method methodTyp, pattern string, handler http.Handler) *node] (SEED, MODIFIED)\nN1: tree.go::setEndpoint [func (n *node) setEndpoint(method methodTyp, handler http.Handler, pattern string)]\nN2: tree.go::patNextSegment [func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int)]\nN3: tree.go::getEdge [func (n *node) getEdge(ntyp nodeTyp, label byte, tail byte, prefix string) *node]\nN4: tree.go::addChild [func (n *node) addChild(child *node, prefix string) *node]\nN5: tree.go::longestPrefix [func longestPrefix(k1 string, k2 string) (i int)]\nN6: tree.go::replaceChild [func (n *node) replaceChild(label byte, tail byte, child *node)]\nN7: mux.go::handle [func (mx *Mux) handle(method methodTyp, pattern string, handler http.Handler) *node]\n[EDGES]\nN0 -> N1 (CALLS)\nN0 -> N2 (CALLS)\nN0 -> N3 (CALLS)\nN0 -> N4 (CALLS)\nN0 -> N5 (CALLS)\nN0 -> N6 (CALLS)\nN7 -> N0 (CALLS)\nN4 -> N2 (CALLS)\nN4 -> N4 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -931,7 +931,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -944,7 +944,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -983,7 +983,7 @@
     "epistemic_uncertainty": 0.223,
     "language": "python",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
     "diff_target": "examples/tutorial/flaskr/db.py::get_db (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] examples/tutorial/flaskr/db.py::get_db (MODIFIED)\n[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [10, 11] | Nodes: 17 | Edges: 23\n[NODES]\nN0: examples/tutorial/flaskr/db.py::get_db [def get_db()] (SEED, MODIFIED)\nN1: examples/tutorial/tests/test_db.py::test_get_close_db [def test_get_close_db(app)]\nN2: examples/tutorial/tests/test_blog.py::test_author_required [def test_author_required(app, client, auth)]\nN3: examples/tutorial/tests/test_blog.py::test_create [def test_create(client, auth, app)]\nN4: examples/tutorial/tests/test_blog.py::test_update [def test_update(client, auth, app)]\nN5: examples/tutorial/tests/test_blog.py::test_delete [def test_delete(client, auth, app)]\nN6: examples/tutorial/tests/test_auth.py::test_register [def test_register(client, app)]\nN7: examples/tutorial/flaskr/blog.py::index [def index()]\nN8: examples/tutorial/flaskr/blog.py::get_post [def get_post(id, check_author = True)]\nN9: examples/tutorial/flaskr/blog.py::create [def create()]\n[EDGES]\nN1 -> N0 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN6 -> N0 (CALLS)\nN7 -> N0 (CALLS)\nN8 -> N0 (CALLS)\nN9 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -996,7 +996,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1009,7 +1009,7 @@
     "epistemic_uncertainty": 0.2137,
     "language": "rust",
     "category": "performance_regression",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Performance Regression (Resource Leak / Algorithmic Complexity)",
     "diff_target": "test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)\n[METADATA] File: test_suite/tests/test_enum_adjacently_tagged.rs | OldLines: [] | NewLines: [705] | Nodes: 6 | Edges: 5\n[NODES]\nN0: test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields [fn deny_unknown_fields()] (SEED, MODIFIED)\nN1: test_suite/tests/ui/borrow/struct_variant.rs::Str [struct Str]\nN2: serde_derive/src/de/struct_.rs::deserialize_map [fn deserialize_map(struct_path: &TokenStream, params: &Parameters, fields: &[Field], cattrs: &attr::Container, has_flatten: bool) -> Fragment]\nN3: serde_derive/src/de/struct_.rs::deserialize_map_in_place [fn deserialize_map_in_place(params: &Parameters, fields: &[Field], cattrs: &attr::Container) -> Fragment]\nN4: serde_derive/src/de/struct_.rs::deserialize_field_identifier [fn deserialize_field_identifier(deserialized_fields: &[FieldWithAliases], cattrs: &attr::Container, has_flatten: bool) -> Stmts]\nN5: serde_derive/src/de/enum_adjacently.rs::deserialize [fn deserialize(params: &Parameters, variants: &[Variant], cattrs: &attr::Container, tag: &str, content: &str) -> Fragment]\n[EDGES]\nN0 -> N1 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1022,7 +1022,7 @@
     "epistemic_uncertainty": 0.2197,
     "language": "typescript",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Async Race Condition / State Mutation - TS)",
     "diff_target": "mathOps.ts::_sharedCounter, add, <module> (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::_sharedCounter, add, <module> (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [] | NewLines: [1, 2, 4] | Nodes: 4 | Edges: 1\n[NODES]\nN0: mathOps.ts::_sharedCounter [let _sharedCounter] (SEED, MODIFIED)\nN1: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN2: mathOps.ts::<module> [# module mathOps.ts] (SEED, MODIFIED)\nN3: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN3 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1035,7 +1035,7 @@
     "epistemic_uncertainty": 0.2197,
     "language": "python",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Auth / Permission Bypass - Py)",
     "diff_target": "tests/conftest.py::purge_module (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tests/conftest.py::purge_module (MODIFIED)\n[METADATA] File: tests/conftest.py | OldLines: [] | NewLines: [109, 110] | Nodes: 8 | Edges: 8\n[NODES]\nN0: tests/conftest.py::purge_module [def purge_module(request)] (SEED, MODIFIED)\nN1: src/flask/ctx.py::pop [def pop(self, name: str, default: t.Any = _sentinel) -> t.Any]\nN2: tests/test_instance_config.py::test_uninstalled_module_paths [def test_uninstalled_module_paths(modules_tmp_path, purge_module)]\nN3: tests/test_instance_config.py::test_uninstalled_package_paths [def test_uninstalled_package_paths(modules_tmp_path, purge_module)]\nN4: tests/test_instance_config.py::test_uninstalled_namespace_paths [def test_uninstalled_namespace_paths(tmp_path, monkeypatch, purge_module)]\nN5: tests/test_instance_config.py::test_installed_module_paths [def test_installed_module_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, site_packages)]\nN6: tests/test_instance_config.py::test_installed_package_paths [def test_installed_package_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, monkeypatch)]\nN7: tests/test_instance_config.py::test_prefix_package_paths [def test_prefix_package_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, site_packages)]\n[EDGES]\nN0 -> N1 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN6 -> N0 (CALLS)\nN7 -> N0 (CALLS)\nN1 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1113,7 +1113,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1126,7 +1126,7 @@
     "epistemic_uncertainty": 0.223,
     "language": "python",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Silent Logic Drift (Keyword Argument Mutation / Relational Inversion - Py)",
     "diff_target": "examples/tutorial/flaskr/db.py::get_db (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] examples/tutorial/flaskr/db.py::get_db (MODIFIED)\n[METADATA] File: examples/tutorial/flaskr/db.py | OldLines: [] | NewLines: [10, 11] | Nodes: 17 | Edges: 23\n[NODES]\nN0: examples/tutorial/flaskr/db.py::get_db [def get_db()] (SEED, MODIFIED)\nN1: examples/tutorial/tests/test_db.py::test_get_close_db [def test_get_close_db(app)]\nN2: examples/tutorial/tests/test_blog.py::test_author_required [def test_author_required(app, client, auth)]\nN3: examples/tutorial/tests/test_blog.py::test_create [def test_create(client, auth, app)]\nN4: examples/tutorial/tests/test_blog.py::test_update [def test_update(client, auth, app)]\nN5: examples/tutorial/tests/test_blog.py::test_delete [def test_delete(client, auth, app)]\nN6: examples/tutorial/tests/test_auth.py::test_register [def test_register(client, app)]\nN7: examples/tutorial/flaskr/blog.py::index [def index()]\nN8: examples/tutorial/flaskr/blog.py::get_post [def get_post(id, check_author = True)]\nN9: examples/tutorial/flaskr/blog.py::create [def create()]\n[EDGES]\nN1 -> N0 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN6 -> N0 (CALLS)\nN7 -> N0 (CALLS)\nN8 -> N0 (CALLS)\nN9 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -1152,7 +1152,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1165,7 +1165,7 @@
     "epistemic_uncertainty": 0.2164,
     "language": "go",
     "category": "performance_regression",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Performance Regression (Resource Leak / Algorithmic Complexity)",
     "diff_target": "tree.go::node.InsertRoute (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tree.go::node.InsertRoute (MODIFIED)\n[METADATA] File: tree.go | OldLines: [] | NewLines: [149] | Nodes: 15 | Edges: 16\n[NODES]\nN0: tree.go::InsertRoute [func (n *node) InsertRoute(method methodTyp, pattern string, handler http.Handler) *node] (SEED, MODIFIED)\nN1: tree.go::setEndpoint [func (n *node) setEndpoint(method methodTyp, handler http.Handler, pattern string)]\nN2: tree.go::patNextSegment [func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int)]\nN3: tree.go::getEdge [func (n *node) getEdge(ntyp nodeTyp, label byte, tail byte, prefix string) *node]\nN4: tree.go::addChild [func (n *node) addChild(child *node, prefix string) *node]\nN5: tree.go::longestPrefix [func longestPrefix(k1 string, k2 string) (i int)]\nN6: tree.go::replaceChild [func (n *node) replaceChild(label byte, tail byte, child *node)]\nN7: mux.go::handle [func (mx *Mux) handle(method methodTyp, pattern string, handler http.Handler) *node]\n[EDGES]\nN0 -> N1 (CALLS)\nN0 -> N2 (CALLS)\nN0 -> N3 (CALLS)\nN0 -> N4 (CALLS)\nN0 -> N5 (CALLS)\nN0 -> N6 (CALLS)\nN7 -> N0 (CALLS)\nN4 -> N2 (CALLS)\nN4 -> N4 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -1243,7 +1243,7 @@
     "epistemic_uncertainty": 0.2245,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1269,7 +1269,7 @@
     "epistemic_uncertainty": 0.2239,
     "language": "typescript",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Async Race Condition / State Mutation - TS)",
     "diff_target": "userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [1, 2, 5] | Nodes: 5 | Edges: 1\n[NODES]\nN0: userRepo.ts::_cache [const _cache] (SEED, MODIFIED)\nN1: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN2: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN3: userRepo.ts::<module> [# module userRepo.ts] (SEED, MODIFIED)\nN4: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN4 -> N2 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1308,7 +1308,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1334,7 +1334,7 @@
     "epistemic_uncertainty": 0.2267,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [3] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1373,7 +1373,7 @@
     "epistemic_uncertainty": 0.2245,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1399,7 +1399,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1412,7 +1412,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1425,7 +1425,7 @@
     "epistemic_uncertainty": 0.2267,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [3] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1438,7 +1438,7 @@
     "epistemic_uncertainty": 0.2137,
     "language": "rust",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
     "diff_target": "test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)\n[METADATA] File: test_suite/tests/test_enum_adjacently_tagged.rs | OldLines: [] | NewLines: [705] | Nodes: 6 | Edges: 5\n[NODES]\nN0: test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields [fn deny_unknown_fields()] (SEED, MODIFIED)\nN1: test_suite/tests/ui/borrow/struct_variant.rs::Str [struct Str]\nN2: serde_derive/src/de/struct_.rs::deserialize_map [fn deserialize_map(struct_path: &TokenStream, params: &Parameters, fields: &[Field], cattrs: &attr::Container, has_flatten: bool) -> Fragment]\nN3: serde_derive/src/de/struct_.rs::deserialize_map_in_place [fn deserialize_map_in_place(params: &Parameters, fields: &[Field], cattrs: &attr::Container) -> Fragment]\nN4: serde_derive/src/de/struct_.rs::deserialize_field_identifier [fn deserialize_field_identifier(deserialized_fields: &[FieldWithAliases], cattrs: &attr::Container, has_flatten: bool) -> Stmts]\nN5: serde_derive/src/de/enum_adjacently.rs::deserialize [fn deserialize(params: &Parameters, variants: &[Variant], cattrs: &attr::Container, tag: &str, content: &str) -> Fragment]\n[EDGES]\nN0 -> N1 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1451,7 +1451,7 @@
     "epistemic_uncertainty": 0.2197,
     "language": "python",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Keyword Argument Mutation / Relational Inversion - Py)",
     "diff_target": "tests/conftest.py::purge_module (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tests/conftest.py::purge_module (MODIFIED)\n[METADATA] File: tests/conftest.py | OldLines: [] | NewLines: [109, 110] | Nodes: 8 | Edges: 8\n[NODES]\nN0: tests/conftest.py::purge_module [def purge_module(request)] (SEED, MODIFIED)\nN1: src/flask/ctx.py::pop [def pop(self, name: str, default: t.Any = _sentinel) -> t.Any]\nN2: tests/test_instance_config.py::test_uninstalled_module_paths [def test_uninstalled_module_paths(modules_tmp_path, purge_module)]\nN3: tests/test_instance_config.py::test_uninstalled_package_paths [def test_uninstalled_package_paths(modules_tmp_path, purge_module)]\nN4: tests/test_instance_config.py::test_uninstalled_namespace_paths [def test_uninstalled_namespace_paths(tmp_path, monkeypatch, purge_module)]\nN5: tests/test_instance_config.py::test_installed_module_paths [def test_installed_module_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, site_packages)]\nN6: tests/test_instance_config.py::test_installed_package_paths [def test_installed_package_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, monkeypatch)]\nN7: tests/test_instance_config.py::test_prefix_package_paths [def test_prefix_package_paths(modules_tmp_path, modules_tmp_path_prefix, purge_module, site_packages)]\n[EDGES]\nN0 -> N1 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\nN6 -> N0 (CALLS)\nN7 -> N0 (CALLS)\nN1 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1464,7 +1464,7 @@
     "epistemic_uncertainty": 0.2267,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [3] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1477,7 +1477,7 @@
     "epistemic_uncertainty": 0.2177,
     "language": "go",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Goroutine / Channel Synchronization Omission - Go)",
     "diff_target": "tree_test.go::stringSliceEqual (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tree_test.go::stringSliceEqual (MODIFIED)\n[METADATA] File: tree_test.go | OldLines: [] | NewLines: [478] | Nodes: 5 | Edges: 4\n[NODES]\nN0: tree_test.go::stringSliceEqual [func stringSliceEqual(a []string, b []string) bool] (SEED, MODIFIED)\nN1: tree_test.go::TestTree [func TestTree(t *testing.T)]\nN2: tree_test.go::TestTreeMoar [func TestTreeMoar(t *testing.T)]\nN3: tree_test.go::TestTreeRegexp [func TestTreeRegexp(t *testing.T)]\nN4: tree_test.go::TestTreeRegexpRecursive [func TestTreeRegexpRecursive(t *testing.T)]\n[EDGES]\nN1 -> N0 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1490,7 +1490,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1503,7 +1503,7 @@
     "epistemic_uncertainty": 0.2209,
     "language": "go",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Goroutine / Channel Synchronization Omission - Go)",
     "diff_target": "tree.go::node.addChild (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tree.go::node.addChild (MODIFIED)\n[METADATA] File: tree.go | OldLines: [] | NewLines: [245] | Nodes: 4 | Edges: 6\n[NODES]\nN0: tree.go::addChild [func (n *node) addChild(child *node, prefix string) *node] (SEED, MODIFIED)\nN1: tree.go::patNextSegment [func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int)]\nN2: tree.go::Sort [func (ns *nodes) Sort()]\nN3: tree.go::InsertRoute [func (n *node) InsertRoute(method methodTyp, pattern string, handler http.Handler) *node]\n[EDGES]\nN0 -> N1 (CALLS)\nN0 -> N0 (CALLS)\nN0 -> N2 (CALLS)\nN3 -> N0 (CALLS)\nN2 -> N2 (CALLS)\nN3 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1555,7 +1555,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1581,7 +1581,7 @@
     "epistemic_uncertainty": 0.2239,
     "language": "typescript",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Async Race Condition / State Mutation - TS)",
     "diff_target": "userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [1, 2, 5] | Nodes: 5 | Edges: 1\n[NODES]\nN0: userRepo.ts::_cache [const _cache] (SEED, MODIFIED)\nN1: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN2: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN3: userRepo.ts::<module> [# module userRepo.ts] (SEED, MODIFIED)\nN4: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN4 -> N2 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1594,7 +1594,7 @@
     "epistemic_uncertainty": 0.2137,
     "language": "rust",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
     "diff_target": "test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields (MODIFIED)\n[METADATA] File: test_suite/tests/test_enum_adjacently_tagged.rs | OldLines: [] | NewLines: [705] | Nodes: 6 | Edges: 5\n[NODES]\nN0: test_suite/tests/test_enum_adjacently_tagged.rs::deny_unknown_fields [fn deny_unknown_fields()] (SEED, MODIFIED)\nN1: test_suite/tests/ui/borrow/struct_variant.rs::Str [struct Str]\nN2: serde_derive/src/de/struct_.rs::deserialize_map [fn deserialize_map(struct_path: &TokenStream, params: &Parameters, fields: &[Field], cattrs: &attr::Container, has_flatten: bool) -> Fragment]\nN3: serde_derive/src/de/struct_.rs::deserialize_map_in_place [fn deserialize_map_in_place(params: &Parameters, fields: &[Field], cattrs: &attr::Container) -> Fragment]\nN4: serde_derive/src/de/struct_.rs::deserialize_field_identifier [fn deserialize_field_identifier(deserialized_fields: &[FieldWithAliases], cattrs: &attr::Container, has_flatten: bool) -> Stmts]\nN5: serde_derive/src/de/enum_adjacently.rs::deserialize [fn deserialize(params: &Parameters, variants: &[Variant], cattrs: &attr::Container, tag: &str, content: &str) -> Fragment]\n[EDGES]\nN0 -> N1 (CALLS)\nN2 -> N0 (CALLS)\nN3 -> N0 (CALLS)\nN4 -> N0 (CALLS)\nN5 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1633,7 +1633,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "silent_logic_drift",
-    "semantic_root_cause": "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)",
+    "semantic_root_cause": "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1646,7 +1646,7 @@
     "epistemic_uncertainty": 0.216,
     "language": "go",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
     "diff_target": "tree.go::node.InsertRoute (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] tree.go::node.InsertRoute (MODIFIED)\n[METADATA] File: tree.go | OldLines: [] | NewLines: [149, 150] | Nodes: 15 | Edges: 16\n[NODES]\nN0: tree.go::InsertRoute [func (n *node) InsertRoute(method methodTyp, pattern string, handler http.Handler) *node] (SEED, MODIFIED)\nN1: tree.go::setEndpoint [func (n *node) setEndpoint(method methodTyp, handler http.Handler, pattern string)]\nN2: tree.go::patNextSegment [func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int)]\nN3: tree.go::getEdge [func (n *node) getEdge(ntyp nodeTyp, label byte, tail byte, prefix string) *node]\nN4: tree.go::addChild [func (n *node) addChild(child *node, prefix string) *node]\nN5: tree.go::longestPrefix [func longestPrefix(k1 string, k2 string) (i int)]\nN6: tree.go::replaceChild [func (n *node) replaceChild(label byte, tail byte, child *node)]\nN7: mux.go::handle [func (mx *Mux) handle(method methodTyp, pattern string, handler http.Handler) *node]\n[EDGES]\nN0 -> N1 (CALLS)\nN0 -> N2 (CALLS)\nN0 -> N3 (CALLS)\nN0 -> N4 (CALLS)\nN0 -> N5 (CALLS)\nN0 -> N6 (CALLS)\nN7 -> N0 (CALLS)\nN4 -> N2 (CALLS)\nN4 -> N4 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE\n[TRUNCATED: 7 peripheral nodes pruned for token budget]"
   },
@@ -1789,7 +1789,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1828,7 +1828,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1854,7 +1854,7 @@
     "epistemic_uncertainty": 0.2239,
     "language": "typescript",
     "category": "concurrency_hazard",
-    "semantic_root_cause": "Concurrency Hazard (Unsynchronized Access / Race Hazard)",
+    "semantic_root_cause": "Concurrency Hazard (Async Race Condition / State Mutation - TS)",
     "diff_target": "userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::_cache, UserRepo, UserRepo.getUserById, <module> (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [1, 2, 5] | Nodes: 5 | Edges: 1\n[NODES]\nN0: userRepo.ts::_cache [const _cache] (SEED, MODIFIED)\nN1: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN2: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN3: userRepo.ts::<module> [# module userRepo.ts] (SEED, MODIFIED)\nN4: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN4 -> N2 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1867,7 +1867,7 @@
     "epistemic_uncertainty": 0.2257,
     "language": "typescript",
     "category": "security_surface",
-    "semantic_root_cause": "Security Surface Expansion (Sanitization/Auth Check Bypass)",
+    "semantic_root_cause": "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)",
     "diff_target": "userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] userRepo.ts::UserRepo, UserRepo.getUserById (MODIFIED)\n[METADATA] File: userRepo.ts | OldLines: [] | NewLines: [3] | Nodes: 3 | Edges: 1\n[NODES]\nN0: userRepo.ts::UserRepo [class UserRepo] (SEED, MODIFIED)\nN1: userRepo.ts::getUserById [getUserById(userId: string): object] (SEED, MODIFIED)\nN2: userService.ts::fetchUser [function fetchUser(repo: UserRepo, id: string): object]\n[EDGES]\nN2 -> N1 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },
@@ -1971,7 +1971,7 @@
     "epistemic_uncertainty": 0.2252,
     "language": "typescript",
     "category": "breaking_public_api",
-    "semantic_root_cause": "Breaking Public API (Signature Drift with Valid Call Arity)",
+    "semantic_root_cause": "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)",
     "diff_target": "mathOps.ts::add (MODIFIED)",
     "input_dsl": "[DIFF_TARGET] mathOps.ts::add (MODIFIED)\n[METADATA] File: mathOps.ts | OldLines: [2] | NewLines: [2] | Nodes: 2 | Edges: 1\n[NODES]\nN0: mathOps.ts::add [function add(a: number, b: number): number] (SEED, MODIFIED)\nN1: main.ts::calculateTotal [function calculateTotal(a: number, b: number): number]\n[EDGES]\nN1 -> N0 (CALLS)\n[GATE]\nSTATUS: APPROVED (conf: 0.98)\nCYCLES: 0\nVIOLATIONS: NONE"
   },

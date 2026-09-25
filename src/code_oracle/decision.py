@@ -245,7 +245,8 @@ class ModernBERTWithMultiTaskHead(nn.Module):
         sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
         h_pool = sum_embeddings / sum_mask
 
-        risk_score = torch.sigmoid(self.risk_head(h_pool))
+        risk_raw = self.risk_head(h_pool)
+        risk_score = torch.sigmoid(risk_raw)
         taxonomy_logits = self.taxonomy_head(h_pool)
         taxonomy_probs = torch.sigmoid(taxonomy_logits)
         s = self.uncertainty_head(h_pool)
@@ -255,6 +256,7 @@ class ModernBERTWithMultiTaskHead(nn.Module):
 
         return {
             "risk_score": risk_score,
+            "risk_logits": risk_raw,
             "taxonomy_logits": taxonomy_logits,
             "taxonomy_probs": taxonomy_probs,
             "log_variance": log_variance,
@@ -277,10 +279,32 @@ class LayaDecisionHead:
         weights_path: Optional[Path] = None,
         enabled: bool = False,
         quantize_int8: Optional[bool] = None,
-        risk_threshold: float = 0.5,
+        risk_threshold: Optional[float] = None,
+        temperature: Optional[float] = None,
     ):
         self.enabled = enabled
-        self.risk_threshold = float(os.environ.get("CODE_ORACLE_RISK_THRESHOLD", str(risk_threshold)))
+        self._risk_threshold_explicit = risk_threshold is not None
+        if risk_threshold is not None:
+            self.risk_threshold = float(risk_threshold)
+        elif "CODE_ORACLE_RISK_THRESHOLD" in os.environ:
+            try:
+                self.risk_threshold = float(os.environ["CODE_ORACLE_RISK_THRESHOLD"])
+            except ValueError:
+                self.risk_threshold = 0.50
+        else:
+            self.risk_threshold = 0.50
+
+        self._temperature_explicit = temperature is not None
+        if temperature is not None:
+            self.temperature = float(temperature)
+        elif "CODE_ORACLE_TEMPERATURE" in os.environ:
+            try:
+                self.temperature = float(os.environ["CODE_ORACLE_TEMPERATURE"])
+            except ValueError:
+                self.temperature = 1.0
+        else:
+            self.temperature = 1.0
+
         self.quantize_int8 = (
             quantize_int8
             if quantize_int8 is not None
@@ -392,6 +416,22 @@ class LayaDecisionHead:
             # Auto-tune CPU threads before model initialization
             self._tune_cpu_threads()
 
+            # Read config.json if available to extract threshold and calibrated temperature
+            config_file = self.weights_path / "config.json"
+            if config_file.exists():
+                try:
+                    import json
+                    with open(config_file, "r", encoding="utf-8") as f_cfg:
+                        cfg_data = json.load(f_cfg)
+                    if not self._risk_threshold_explicit and "CODE_ORACLE_RISK_THRESHOLD" not in os.environ:
+                        if "default_decision_threshold" in cfg_data:
+                            self.risk_threshold = float(cfg_data["default_decision_threshold"])
+                    if not self._temperature_explicit and "CODE_ORACLE_TEMPERATURE" not in os.environ:
+                        if "calibrated_temperature" in cfg_data:
+                            self.temperature = float(cfg_data["calibrated_temperature"])
+                except Exception as e_cfg:
+                    logger.debug(f"Could not load config.json: {e_cfg}")
+
             # 1. Check for native Multi-Task PyTorch safetensors model
             safetensors_file = self.weights_path / "model.safetensors"
             if safetensors_file.exists():
@@ -487,6 +527,7 @@ class LayaDecisionHead:
         cycles: Optional[List[List[str]]] = None,
         taxonomy_threshold: float = 0.5,
         risk_threshold: Optional[float] = None,
+        temperature: Optional[float] = None,
     ) -> EnhancedDecisionResult:
         """
         Evaluate linearized DSL subgraph with Multi-Task Risk Taxonomy
@@ -495,6 +536,7 @@ class LayaDecisionHead:
         violations = violations or []
         cycles = cycles or []
         eff_risk_threshold = self.risk_threshold if risk_threshold is None else risk_threshold
+        eff_temperature = self.temperature if temperature is None else temperature
 
         # Hard rule: If deterministic symbolic gate caught a definite violation (cycle or arity),
         # symbolic gate has absolute veto power (REJECTED).
@@ -539,7 +581,22 @@ class LayaDecisionHead:
                     with torch.no_grad():
                         out = self.pytorch_multitask_model(tokens["input_ids"], tokens["attention_mask"])
 
-                    pred_risk = round(out["risk_score"].item(), 4)
+                    raw_risk = out["risk_score"].item()
+                    raw_logits = out.get("risk_logits")
+
+                    if eff_temperature is not None and eff_temperature > 0 and abs(eff_temperature - 1.0) > 1e-4:
+                        if raw_logits is not None:
+                            scaled_risk = torch.sigmoid(raw_logits / eff_temperature).item()
+                        else:
+                            import math
+                            eps = 1e-6
+                            clamped_r = min(max(raw_risk, eps), 1.0 - eps)
+                            z = math.log(clamped_r / (1.0 - clamped_r))
+                            scaled_risk = 1.0 / (1.0 + math.exp(-z / eff_temperature))
+                        pred_risk = round(scaled_risk, 4)
+                    else:
+                        pred_risk = round(raw_risk, 4)
+
                     tax_probs = out["taxonomy_probs"].squeeze(0).tolist()
                     pred_conf = round(out["confidence"].item(), 4)
                     s = out["log_variance"]

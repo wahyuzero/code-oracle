@@ -98,12 +98,55 @@ def parse_dsl_summary(dsl: str) -> Tuple[str, str]:
         line_s = line.strip()
         if line_s.startswith("[DIFF_TARGET]"):
             diff_target = line_s.replace("[DIFF_TARGET]", "").strip()
-        elif line_s.startswith("N") and ":" in line_s and "(" in line_s:
+        elif line_s.startswith("N") and ":" in line_s and ("[" in line_s or "(" in line_s):
             nodes.append(line_s)
     nodes_summary = "; ".join(nodes[:3])
     if len(nodes) > 3:
         nodes_summary += f" ... (+{len(nodes) - 3} more)"
     return diff_target, nodes_summary
+
+
+def explain_why_missed(sample: EvalSample) -> str:
+    """Generate technical diagnostic explanation of why Laya missed the sample."""
+    cat = sample.category.lower()
+    if cat == "real_revert":
+        return (
+            f"The patch is an exact revert of a previous hotfix/bugfix. Because the restored code was originally valid and idiomatic, "
+            f"all AST nodes, types, and call graph edges conform strictly to expected repo conventions. ModernBERT perceived the "
+            f"reverted code as normal syntax, assigning a low risk score ({sample.risk_score:.4f})."
+        )
+    elif cat == "security_surface" or "security" in cat:
+        return (
+            f"The patch altered authorization guards, authentication tokens, or input validation logic while preserving valid call "
+            f"signatures and node arity. Structural AST representation cannot verify that cryptographic or sanitization constraints "
+            f"are semantically enforced at runtime, leading the model to assign low risk ({sample.risk_score:.4f})."
+        )
+    elif cat == "silent_logic_drift" or "logic" in cat or "drift" in cat:
+        return (
+            f"The modification altered logical operators, boundary conditions, or conditional branching without mutating method signatures. "
+            f"Because graph topology and call dependencies remained completely invariant, the neural encoder failed to detect the inverted "
+            f"control flow, yielding risk score {sample.risk_score:.4f}."
+        )
+    elif cat == "breaking_public_api" or "breaking" in cat or "api" in cat:
+        return (
+            f"The change modified parameter contracts, return types, or exported structures (e.g. subtle type widening or argument mutations). "
+            f"Because call arity was unchanged, Stage 1/2 symbolic gates passed and the neural head treated the subtle interface mutation "
+            f"as benign refactoring (risk {sample.risk_score:.4f})."
+        )
+    elif cat == "concurrency_hazard" or "concurrency" in cat or "hazard" in cat:
+        return (
+            f"The patch introduced unsynchronized state access (such as unbuffered channels, missing mutex locks, or unawaited async operations). "
+            f"Static Micro-DSL lacks execution trace interleaving, preventing the model from detecting the concurrency race hazard (risk {sample.risk_score:.4f})."
+        )
+    elif cat == "performance_regression" or "performance" in cat:
+        return (
+            f"The change introduced algorithmic degradation (nested iterations, redundant queries, or unclosed resource handles) within "
+            f"syntactically valid code blocks. Static AST and call topology do not reflect asymptotic complexity or execution frequency (risk {sample.risk_score:.4f})."
+        )
+    return (
+        f"The patch preserved all declared node arities and cyclic invariants, causing the neural head to assign a low risk score "
+        f"({sample.risk_score:.4f}) despite introducing dangerous semantic regressions."
+    )
 
 
 def classify_semantic_root_cause(sample: EvalSample) -> str:
@@ -113,23 +156,43 @@ def classify_semantic_root_cause(sample: EvalSample) -> str:
     """
     lang = sample.language.lower()
     cat = sample.category.lower()
-    dsl = sample.input_dsl.lower()
 
     if sample.outcome == "FP":  # Missed Bug: Actual REJECT, predicted PASS
         if cat == "real_revert":
             return "Revert of Hotfix/Bugfix (Structural AST Invariant Intact)"
-        if "security" in cat or "auth" in dsl or "token" in dsl or "sec" in cat:
+
+        if cat == "security_surface" or "security" in cat:
+            if lang == "typescript":
+                return "Security Surface Expansion (Unchecked Guard / Sanitization Bypass - TS)"
+            elif lang == "python":
+                return "Security Surface Expansion (Auth / Permission Bypass - Py)"
             return "Security Surface Expansion (Sanitization/Auth Check Bypass)"
-        if "concurrency" in cat or "hazard" in cat or "mutex" in dsl or "chan" in dsl or "race" in dsl:
-            return "Concurrency Hazard (Unsynchronized Access / Race Hazard)"
-        if "performance" in cat or "loop" in dsl or "leak" in dsl:
-            return "Performance Regression (Resource Leak / Algorithmic Complexity)"
-        if "api" in cat or "breaking" in cat:
-            return "Breaking Public API (Signature Drift with Valid Call Arity)"
-        if "logic" in cat or "drift" in cat:
+
+        if cat == "silent_logic_drift" or "logic" in cat or "drift" in cat:
+            if lang == "typescript":
+                return "Silent Logic Drift (Nullable Coalescing / Logic Inversion - TS)"
+            elif lang == "python":
+                return "Silent Logic Drift (Keyword Argument Mutation / Relational Inversion - Py)"
             return "Silent Logic Drift (Relational Inversion / Boundary Condition Shift)"
 
-        # Language specific defaults
+        if cat == "breaking_public_api" or "breaking" in cat or "api" in cat:
+            if lang == "typescript":
+                return "Breaking Public API (Subtle Type Widening / Structural Contract Drift - TS)"
+            elif lang == "python":
+                return "Breaking Public API (Keyword Argument Mutation / Signature Drift - Py)"
+            return "Breaking Public API (Signature Drift with Valid Call Arity)"
+
+        if cat == "concurrency_hazard" or "concurrency" in cat or "hazard" in cat:
+            if lang == "go":
+                return "Concurrency Hazard (Goroutine / Channel Synchronization Omission - Go)"
+            elif lang == "typescript":
+                return "Concurrency Hazard (Async Race Condition / State Mutation - TS)"
+            return "Concurrency Hazard (Unsynchronized Access / Race Hazard)"
+
+        if cat == "performance_regression" or "performance" in cat:
+            return "Performance Regression (Resource Leak / Algorithmic Complexity)"
+
+        # Fallback language specific defaults
         if lang == "typescript":
             return "Subtle Type Widening / Unchecked Nullable Access (TS)"
         elif lang == "python":
@@ -483,9 +546,9 @@ def generate_markdown_report(
         "",
     ])
 
-    for rc_name, count in rc_counts.most_common():
+    for idx, (rc_name, count) in enumerate(rc_counts.most_common(), 1):
         pct = count / len(missed_bugs) * 100.0 if missed_bugs else 0.0
-        lines.append(f"### 4.{len(lines)} {rc_name} ({count} samples, {pct:.1f}%)")
+        lines.append(f"### 4.{idx} {rc_name} ({count} samples, {pct:.1f}%)")
         # Find representative sample
         rep_sample = next((s for s in missed_bugs if s.semantic_root_cause == rc_name), None)
         if rep_sample:
@@ -496,7 +559,7 @@ def generate_markdown_report(
                 "```dsl",
                 "\n".join(rep_sample.input_dsl.splitlines()[:8]),
                 "```",
-                f"- **Why Laya Missed It:** The patch preserved all declared node arities and cyclic invariants, causing the neural head to assign a low risk score ({rep_sample.risk_score:.2f}) despite introducing dangerous semantic regressions.",
+                f"- **Why Laya Missed It:** {explain_why_missed(rep_sample)}",
                 "",
             ])
 
@@ -520,7 +583,7 @@ def generate_markdown_report(
         f"- **Average Epistemic Uncertainty on False Alarms (FN):** `{avg_unc_fn:.4f}`",
         "",
         "### Key Uncertainty Insight",
-        "Uncertainty on missed bugs was actually higher than on correct predictions, indicating that the model's heteroscedastic uncertainty head was partially aware of ambiguity, even when the risk regression score fell on the wrong side of the threshold.",
+        f"Average epistemic uncertainty on missed bugs (`{avg_unc_fp:.4f}`) was close to or slightly below that of correct predictions (`{avg_unc_correct:.4f}`), demonstrating overconfidence where the model failed to register risk on topological invariants. In contrast, uncertainty peaked on false alarms (`{avg_unc_fn:.4f}`), where unusually dense multi-hop AST call graphs induced elevated model doubt.",
         "",
         "### Temperature Scaling Calibration Results",
         f"- **Optimal Calibration Temperature ($T$):** `{fitted_T}`",

@@ -33,7 +33,7 @@ def evaluate_dataset(
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
 
-    head = LayaDecisionHead(weights_path=weights_path, enabled=bool(weights_path))
+    head = LayaDecisionHead(weights_path=weights_path, enabled=bool(weights_path), risk_threshold=risk_threshold)
 
     records: List[Dict[str, Any]] = []
     with open(dataset_path, "r", encoding="utf-8") as f:
@@ -69,6 +69,7 @@ def evaluate_dataset(
             symbolic_status=symbolic_status,
             symbolic_confidence=symbolic_conf,
             has_violations=has_violations,
+            risk_threshold=risk_threshold,
         )
 
         pred_label = 1 if pred_res.status == "APPROVED" and pred_res.risk_score < risk_threshold else 0

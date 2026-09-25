@@ -157,3 +157,76 @@ def test_laya_decision_head_configurable_threshold():
         risk_threshold=0.50,
     )
     assert res_normal.status == "APPROVED"
+
+
+def test_explain_why_missed():
+    from error_analysis import explain_why_missed
+    sample_revert = EvalSample(
+        index=0, true_label=0, risk_score=0.25, confidence=0.8, epistemic_uncertainty=0.1,
+        taxonomy_scores={}, language="python", category="real_revert", source_type="real_hotfix", input_dsl=""
+    )
+    explanation = explain_why_missed(sample_revert)
+    assert "exact revert of a previous hotfix/bugfix" in explanation
+
+    sample_sec = EvalSample(
+        index=1, true_label=0, risk_score=0.35, confidence=0.8, epistemic_uncertainty=0.1,
+        taxonomy_scores={}, language="typescript", category="security_surface", source_type="mutation", input_dsl=""
+    )
+    assert "authorization guards" in explain_why_missed(sample_sec)
+
+
+def test_generate_markdown_report_sequential_headers(tmp_path):
+    from error_analysis import generate_markdown_report
+    samples = [
+        EvalSample(index=0, true_label=1, risk_score=0.1, confidence=0.9, epistemic_uncertainty=0.05, taxonomy_scores={}, language="python", category="clean_pass", source_type="clean", input_dsl="[DIFF_TARGET] app.py\nN0: app.py [func()]\n"),
+        EvalSample(index=1, true_label=0, risk_score=0.3, confidence=0.8, epistemic_uncertainty=0.1, taxonomy_scores={}, language="python", category="real_revert", source_type="real_hotfix", input_dsl="[DIFF_TARGET] app.py\nN0: app.py [func()]\n"),
+        EvalSample(index=2, true_label=0, risk_score=0.4, confidence=0.8, epistemic_uncertainty=0.1, taxonomy_scores={}, language="typescript", category="security_surface", source_type="mutation", input_dsl="[DIFF_TARGET] sec.ts\nN0: sec.ts [func()]\n"),
+    ]
+    sweep_results = [
+        {"threshold": 0.40, "accuracy": 0.67, "precision": 0.5, "recall": 1.0, "specificity": 0.5, "f1": 0.67, "TP": 1, "FP": 1, "TN": 1, "FN": 0},
+    ]
+    report_file = tmp_path / "test_report.md"
+    content = generate_markdown_report(
+        samples=samples,
+        threshold=0.50,
+        sweep_results=sweep_results,
+        fitted_T=1.93,
+        ece_pre=0.14,
+        ece_post=0.10,
+        output_path=report_file,
+    )
+    assert "### 4.1 " in content
+    assert "### 4.2 " in content
+    assert "4.58" not in content  # Confirms no line-number bug
+    assert "4.67" not in content
+    assert report_file.exists()
+
+
+def test_laya_decision_head_config_loading_and_precedence(tmp_path, monkeypatch):
+    import json
+    weights_dir = tmp_path / "fake_weights"
+    weights_dir.mkdir()
+    cfg = {
+        "default_decision_threshold": 0.42,
+        "calibrated_temperature": 1.85,
+    }
+    with open(weights_dir / "config.json", "w") as f:
+        json.dump(cfg, f)
+
+    # 1. Config loading when no explicit param or env var
+    head_cfg = LayaDecisionHead(weights_path=weights_dir, enabled=True)
+    assert head_cfg.risk_threshold == 0.42
+    assert head_cfg.temperature == 1.85
+
+    # 2. Env var overrides config.json
+    monkeypatch.setenv("CODE_ORACLE_RISK_THRESHOLD", "0.38")
+    monkeypatch.setenv("CODE_ORACLE_TEMPERATURE", "2.10")
+    head_env = LayaDecisionHead(weights_path=weights_dir, enabled=True)
+    assert head_env.risk_threshold == 0.38
+    assert head_env.temperature == 2.10
+
+    # 3. Explicit argument overrides env var
+    head_arg = LayaDecisionHead(weights_path=weights_dir, enabled=True, risk_threshold=0.25, temperature=1.2)
+    assert head_arg.risk_threshold == 0.25
+    assert head_arg.temperature == 1.2
+
