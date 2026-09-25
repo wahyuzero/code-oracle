@@ -51,3 +51,21 @@ def test_verify_patch_endpoint_rejected(server_workspace):
     assert result["status"] == "REJECTED"
     assert len(result["invariant_violations"]) > 0
     assert result["latency_ms"] < 50.0
+
+
+def test_verify_patch_endpoint_neural_flag(server_workspace):
+    patch = """@@ -1,2 +1,2 @@
+-def execute():
++def execute(mode: str = "fast"):
+"""
+    result = verify_patch(
+        file_path="handler.py",
+        patch_content=patch,
+        workspace_dir=str(server_workspace),
+        enable_neural=True,
+    )
+
+    assert result["status"] == "APPROVED"
+    assert "risk_score" in result
+    assert 0.0 <= result["risk_score"] <= 1.0
+

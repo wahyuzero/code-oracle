@@ -21,13 +21,23 @@ def get_engine(workspace_dir: Optional[str] = None) -> TopoSliceEngine:
 
 
 def verify_patch(
-    file_path: str, patch_content: str, workspace_dir: Optional[str] = None
+    file_path: str,
+    patch_content: str,
+    workspace_dir: Optional[str] = None,
+    enable_neural: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Lean verification endpoint for AI coding agents.
     Evaluates AST topology and neuro-symbolic invariants in sub-50ms.
     """
     engine = get_engine(workspace_dir)
+    if enable_neural is True:
+        engine.decision_head.enable_neural_head()
+        engine.enable_neural = True
+    elif enable_neural is False:
+        engine.enable_neural = False
+        engine.decision_head.enabled = False
+
     report = engine.verify(file_path=file_path, patch_content=patch_content)
     return report.to_dict()
 
@@ -40,9 +50,16 @@ def run_server():
         mcp = FastMCP("Code-Oracle")
 
         @mcp.tool()
-        def verify_code_patch(file_path: str, patch_content: str) -> Dict[str, Any]:
-            """Verify code modification topology and contract invariants in sub-50ms."""
-            return verify_patch(file_path, patch_content)
+        def verify_code_patch(
+            file_path: str,
+            patch_content: str,
+            neural: bool = False,
+        ) -> Dict[str, Any]:
+            """
+            Verify code modification topology and contract invariants in sub-50ms.
+            Set neural=True to activate deep Laya ModernBERT risk scoring.
+            """
+            return verify_patch(file_path, patch_content, enable_neural=neural)
 
         mcp.run()
     except ImportError:

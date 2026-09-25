@@ -149,3 +149,17 @@ def test_engine_neural_toggle_env_and_config(tmp_path: Path, monkeypatch):
     # Explicit override takes precedence over config
     engine_override = TopoSliceEngine(workspace_root=tmp_path, enable_neural=False)
     assert not engine_override.enable_neural
+
+
+def test_tune_cpu_threads():
+    threads = LayaDecisionHead._tune_cpu_threads()
+    assert isinstance(threads, int)
+    assert 1 <= threads <= 8
+
+
+def test_enable_neural_head():
+    head = LayaDecisionHead(enabled=False)
+    assert not head.is_neural_enabled
+    assert head.enable_neural_head()
+    assert head.is_neural_enabled
+

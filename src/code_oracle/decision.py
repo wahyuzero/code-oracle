@@ -66,12 +66,59 @@ class LayaDecisionHead:
                 return c.resolve()
         return None
 
+    @staticmethod
+    def _tune_cpu_threads() -> int:
+        """
+        Auto-tune PyTorch thread settings for CPU inference.
+        Restricts threads to physical cores to avoid hyperthread cache contention
+        and memory bus saturation on DDR RAM.
+        """
+        try:
+            import os
+            import torch
+
+            # If GPU is available, do not constrain CPU threads
+            if torch.cuda.is_available():
+                return torch.get_num_threads()
+
+            physical_cores = None
+            # Try reading /proc/cpuinfo on Linux for exact physical core count
+            if os.path.exists("/proc/cpuinfo"):
+                try:
+                    with open("/proc/cpuinfo", "r", encoding="utf-8") as f:
+                        cores = set()
+                        phys_id = "0"
+                        for line in f:
+                            if line.startswith("physical id"):
+                                phys_id = line.split(":")[1].strip()
+                            elif line.startswith("core id"):
+                                core_id = line.split(":")[1].strip()
+                                cores.add(f"{phys_id}:{core_id}")
+                        if cores:
+                            physical_cores = len(cores)
+                except Exception:
+                    pass
+
+            if not physical_cores:
+                total = os.cpu_count() or 1
+                # Standard hyperthreading heuristic
+                physical_cores = max(1, total // 2 if total > 2 else total)
+
+            tuned_threads = max(1, min(physical_cores, 8))
+            torch.set_num_threads(tuned_threads)
+            return tuned_threads
+        except Exception:
+            return 1
+
     def _try_load_model(self) -> None:
         try:
             import contextlib
             import io
             import warnings
             import laya
+
+            # Auto-tune CPU threads before model initialization
+            self._tune_cpu_threads()
 
             logger.info(f"Loading fine-tuned Laya weights from {self.weights_path}")
             with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -82,6 +129,16 @@ class LayaDecisionHead:
             logger.warning(f"Could not load Laya model from {self.weights_path}: {e}")
             self.agent = None
             self._loaded = False
+
+    def enable_neural_head(self) -> bool:
+        """Dynamically enable and load neural head if weights exist and not loaded."""
+        if not self._loaded:
+            self.enabled = True
+            if not self.weights_path:
+                self.weights_path = self._resolve_weights_path(None)
+            if self.weights_path and self.weights_path.exists():
+                self._try_load_model()
+        return self.is_neural_enabled
 
     @property
     def is_neural_enabled(self) -> bool:
