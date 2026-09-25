@@ -92,12 +92,21 @@ Code Oracle operates within explicit technical boundaries:
 
 ---
 
+## Pretrained Model Weights
+
+The fine-tuned Laya ModernBERT 421M decision head weights are hosted on Hugging Face:  
+🤗 [**wxsys/code-oracle-laya-421m**](https://huggingface.co/wxsys/code-oracle-laya-421m)
+
+Code Oracle automatically downloads and caches these weights to `~/.cache/code_oracle/weights/` on first invocation when `--neural` is enabled, or reads from local `./weights/` if present.
+
+---
+
 ## Roadmap
 
 - [x] Architecture Specification & Subgraph Slicing Design
 - [x] TopoSlice AST Slicer & Incremental Workspace Indexer
 - [x] Tarjan's SCC Cycle Detector & Deterministic Symbolic Gate
-- [x] Persistent In-Memory Laya Decision Head & Fine-Tuned Weights (`weights/`)
+- [x] Persistent In-Memory Laya Decision Head & Fine-Tuned Weights (`wxsys/code-oracle-laya-421m`)
 - [x] Lean FastMCP Server interface (`verify_patch`)
 - [x] Agentic `SKILL.md` distribution for Claude Code, Cursor, and Antigravity
 - [x] Git pre-commit & pre-push verification hook with unblock toggle (`code-oracle hook`)
