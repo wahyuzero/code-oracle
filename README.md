@@ -97,12 +97,14 @@ Code Oracle operates within explicit technical boundaries:
 - [x] Architecture Specification & Subgraph Slicing Design
 - [x] TopoSlice AST Slicer & Incremental Workspace Indexer
 - [x] Tarjan's SCC Cycle Detector & Deterministic Symbolic Gate
-- [ ] Persistent In-Memory Laya Inference Engine (ONNX Runtime / MLX)
+- [x] Persistent In-Memory Laya Decision Head & Fine-Tuned Weights (`weights/`)
 - [x] Lean FastMCP Server interface (`verify_patch`)
 - [x] Agentic `SKILL.md` distribution for Claude Code, Cursor, and Antigravity
 - [x] Git pre-commit & pre-push verification hook with unblock toggle (`code-oracle hook`)
 - [x] Multi-language AST extractors for Tier 1 languages (Python, TypeScript, Go, Rust)
-- [x] Synthetic mutation and training dataset mining engine (`tools/dataset_generator.py`)
+- [x] Synthetic mutation and training dataset mining engine (`tools/mine_top_repos.py`)
+- [x] Google Colab Multi-Language Fine-Tuning Pipeline (`notebooks/Laya_Code_Oracle_Finetune.ipynb`)
+- [x] CPU Thread Auto-Tuning & Hybrid Neuro-Symbolic Latency Optimization
 
 ---
 
