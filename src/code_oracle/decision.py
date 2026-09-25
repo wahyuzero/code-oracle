@@ -39,14 +39,25 @@ VERIFICATION_QUESTIONS = {
 
 class LayaDecisionHead:
     """
-    Lean neural decision head interfacing with Laya ModernBERT 421M.
+    Lean neural decision head interfacing with Laya ModernBERT (421M large or 164M base).
     Provides sub-50ms local verification with calibrated risk scores.
+    Supports on-the-fly INT8 dynamic quantization for minimal memory footprint.
     """
 
     DEFAULT_HF_REPO: str = "wxsys/code-oracle-laya-421m"
 
-    def __init__(self, weights_path: Optional[Path] = None, enabled: bool = False):
+    def __init__(
+        self,
+        weights_path: Optional[Path] = None,
+        enabled: bool = False,
+        quantize_int8: Optional[bool] = None,
+    ):
         self.enabled = enabled
+        self.quantize_int8 = (
+            quantize_int8
+            if quantize_int8 is not None
+            else os.environ.get("CODE_ORACLE_INT8", "0").lower() in ("1", "true", "yes")
+        )
         self.weights_path = self._resolve_weights_path(weights_path) if enabled else None
         self.agent = None
         self._loaded = False
@@ -68,6 +79,7 @@ class LayaDecisionHead:
             Path.home() / ".cache" / "code_oracle" / "weights",
             Path(__file__).resolve().parent / "weights",
             Path.cwd() / "weights",
+            Path("/content/code_oracle_laya_base_model"),
             Path("/content/code_oracle_laya_model"),
         ]
         for c in candidates:
@@ -154,6 +166,22 @@ class LayaDecisionHead:
             with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 warnings.simplefilter("ignore")
                 self.agent = laya.load(str(self.weights_path))
+
+            # Apply dynamic INT8 quantization if requested
+            if self.quantize_int8 and self.agent and hasattr(self.agent, "model"):
+                try:
+                    import torch
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        self.agent.model.encoder = torch.ao.quantization.quantize_dynamic(
+                            self.agent.model.encoder,
+                            {torch.nn.Linear},
+                            dtype=torch.qint8,
+                        )
+                    logger.info("Applied dynamic INT8 quantization to encoder linear layers")
+                except Exception as q_err:
+                    logger.debug(f"Dynamic INT8 quantization skipped: {q_err}")
+
             self._loaded = True
         except Exception as e:
             logger.warning(f"Could not load Laya model from {self.weights_path}: {e}")

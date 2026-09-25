@@ -31,6 +31,7 @@ class TopoSliceEngine:
         workspace_root: Optional[Path] = None,
         weights_path: Optional[Path] = None,
         enable_neural: Optional[bool] = None,
+        quantize_int8: Optional[bool] = None,
     ):
         self.workspace_root = Path(workspace_root or Path.cwd()).resolve()
         self.indexer = WorkspaceIndexer(workspace_root=self.workspace_root)
@@ -45,7 +46,9 @@ class TopoSliceEngine:
 
         self.enable_neural = bool(enable_neural)
         self.decision_head = LayaDecisionHead(
-            weights_path=weights_path, enabled=self.enable_neural
+            weights_path=weights_path,
+            enabled=self.enable_neural,
+            quantize_int8=quantize_int8,
         )
 
     def verify(
