@@ -657,4 +657,133 @@ def test_engine_verify_with_historical_original_content(tmp_path: Path):
     assert "calculate_fee" in rep.affected_symbols
 
 
+def test_targeted_typescript_mutation_generators():
+    """Verify targeted subtle mutation generators for TypeScript (Langkah 3)."""
+    from code_oracle.linearizer import estimate_tokens
+
+    gen = DatasetGenerator(languages=["typescript"], seed=42)
+    records = gen.generate_targeted_typescript_mutations(count_per_type=1)
+
+    assert len(records) > 0
+
+    # Separate positive and negative records
+    negatives = [r for r in records if r.label == 0]
+    positives = [r for r in records if r.label == 1]
+    assert len(negatives) > 0
+    assert len(positives) > 0
+
+    # 1. 100% symbolic gate compliance (symbolic_gate_passed=True)
+    for r in records:
+        assert r.language == "typescript"
+        assert r.symbolic_gate_passed is True
+        assert "STATUS: APPROVED" in r.input_dsl
+        assert estimate_tokens(r.input_dsl) <= 400
+
+    # 2. Verify all 4 targeted failure categories are covered in negative records
+    neg_categories = {r.category for r in negatives}
+    assert "breaking_public_api" in neg_categories
+    assert "silent_logic_drift" in neg_categories
+    assert "concurrency_hazard" in neg_categories
+
+    # 3. Verify risk taxonomy activations
+    has_api = any(r.taxonomy_labels.get("BreakingPublicAPI", 0.0) >= 0.8 for r in negatives)
+    has_drift = any(r.taxonomy_labels.get("SilentLogicDrift", 0.0) >= 0.8 for r in negatives)
+    has_conc = any(r.taxonomy_labels.get("ConcurrencyHazard", 0.0) >= 0.8 for r in negatives)
+    assert has_api, "Expected BreakingPublicAPI taxonomy to be activated for type widening / destructuring"
+    assert has_drift, "Expected SilentLogicDrift taxonomy to be activated for optional chaining"
+    assert has_conc, "Expected ConcurrencyHazard taxonomy to be activated for floating promise"
+
+
+def test_targeted_python_mutation_generators():
+    """Verify targeted subtle mutation generators for Python (Langkah 3)."""
+    from code_oracle.linearizer import estimate_tokens
+
+    gen = DatasetGenerator(languages=["python"], seed=42)
+    records = gen.generate_targeted_python_mutations(count_per_type=1)
+
+    assert len(records) > 0
+
+    negatives = [r for r in records if r.label == 0]
+    positives = [r for r in records if r.label == 1]
+    assert len(negatives) > 0
+    assert len(positives) > 0
+
+    # 1. 100% symbolic gate compliance
+    for r in records:
+        assert r.language == "python"
+        assert r.symbolic_gate_passed is True
+        assert "STATUS: APPROVED" in r.input_dsl
+        assert estimate_tokens(r.input_dsl) <= 400
+
+    # 2. Verify all 4 targeted failure categories are covered in negative records
+    neg_categories = {r.category for r in negatives}
+    assert "breaking_public_api" in neg_categories  # kwargs drift
+    assert "performance_regression" in neg_categories  # mutable default
+    assert "silent_logic_drift" in neg_categories  # truthiness drift
+    assert "real_revert" in neg_categories  # revert mimic
+
+    # 3. Verify risk taxonomy activations
+    has_api = any(r.taxonomy_labels.get("BreakingPublicAPI", 0.0) >= 0.8 for r in negatives)
+    has_perf = any(r.taxonomy_labels.get("PerformanceRegression", 0.0) >= 0.8 for r in negatives)
+    has_drift = any(r.taxonomy_labels.get("SilentLogicDrift", 0.0) >= 0.8 for r in negatives)
+    has_sec = any(r.taxonomy_labels.get("SecuritySurface", 0.0) >= 0.8 for r in negatives)
+    assert has_api, "Expected BreakingPublicAPI taxonomy for kwargs drift"
+    assert has_perf, "Expected PerformanceRegression taxonomy for mutable default"
+    assert has_drift, "Expected SilentLogicDrift taxonomy for truthiness drift"
+    assert has_sec, "Expected SecuritySurface taxonomy for revert mimic"
+
+
+def test_targeted_dataset_expansion_integrity():
+    """Verify expand_dataset preserves exact class balance and 100% symbolic gate compliance."""
+    gen = DatasetGenerator(languages=["typescript", "python"], seed=42)
+
+    # Initial small datasets (balanced)
+    base_train = [
+        DatasetRecord(input_dsl="[DIFF_TARGET] a.py\n[GATE]\nSTATUS: APPROVED", label=1, risk_score=0.05, category="clean_pass", language="python"),
+        DatasetRecord(input_dsl="[DIFF_TARGET] b.py\n[GATE]\nSTATUS: APPROVED", label=0, risk_score=0.90, category="silent_logic_drift", language="python"),
+    ]
+    base_val = [
+        DatasetRecord(input_dsl="[DIFF_TARGET] c.py\n[GATE]\nSTATUS: APPROVED", label=1, risk_score=0.05, category="clean_pass", language="python"),
+        DatasetRecord(input_dsl="[DIFF_TARGET] d.py\n[GATE]\nSTATUS: APPROVED", label=0, risk_score=0.90, category="silent_logic_drift", language="python"),
+    ]
+
+    exp_train, exp_val = gen.expand_dataset(
+        train_records=base_train,
+        val_records=base_val,
+        num_ts_samples=16,
+        num_py_samples=16,
+        val_ratio=0.25,
+    )
+
+    # Verify class balance in both splits
+    train_pos = sum(1 for r in exp_train if r.label == 1)
+    train_neg = sum(1 for r in exp_train if r.label == 0)
+    assert train_pos == train_neg, f"Train imbalance: {train_pos} vs {train_neg}"
+
+    val_pos = sum(1 for r in exp_val if r.label == 1)
+    val_neg = sum(1 for r in exp_val if r.label == 0)
+    assert val_pos == val_neg, f"Val imbalance: {val_pos} vs {val_neg}"
+
+    # Verify 100% symbolic gate compliance
+    assert all(r.symbolic_gate_passed is True for r in exp_train + exp_val)
+
+
+def test_targeted_mutations_cli_dispatch():
+    """Verify generate_targeted_mutations dispatches correctly across languages."""
+    gen = DatasetGenerator(languages=["typescript", "python"], seed=42)
+
+    both = gen.generate_targeted_mutations(languages=["typescript", "python"], count_per_type=1)
+    langs = {r.language for r in both}
+    assert "typescript" in langs
+    assert "python" in langs
+    assert len(both) > 0
+
+    ts_only = gen.generate_targeted_mutations(languages=["typescript"], count_per_type=1)
+    assert all(r.language == "typescript" for r in ts_only)
+
+    py_only = gen.generate_targeted_mutations(languages=["python"], count_per_type=1)
+    assert all(r.language == "python" for r in py_only)
+
+
+
 
