@@ -313,7 +313,7 @@ class LayaDecisionHead:
     or deterministic heuristic gate verdicts.
     """
 
-    DEFAULT_HF_REPO: str = "wxsys/code-oracle-laya-421m"
+    DEFAULT_HF_REPO: str = "wxsys/tyranid-bert"
 
     def __init__(
         self,
