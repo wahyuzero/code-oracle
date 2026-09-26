@@ -79,7 +79,7 @@ def _extract_rust_calls(node: Node, source_bytes: bytes, caller_id: Optional[str
             args_node = n.child_by_field_name("arguments")
             if args_node:
                 for arg in args_node.children:
-                    if arg.type in ("(", ")", ","):
+                    if arg.type in ("(", ")", ",", "comment", "line_comment", "block_comment") or "comment" in arg.type:
                         continue
                     args_count += 1
 

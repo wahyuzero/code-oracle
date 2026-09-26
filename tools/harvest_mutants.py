@@ -252,10 +252,10 @@ class MutableDefaultsOperator(MutationOperator):
             return False
         return bool(
             re.search(
-                r"def\s+\w+\([^)]*:\s*(Optional\[(?:dict|list|set)\]|dict|list|None)\s*=\s*None",
+                r"def\s+\w+\([^)]*:\s*(?:Optional\[(?:dict|list|set)\]|(?:dict|list|set)\s*\|\s*None|dict|list|set|None)\s*=\s*None",
                 content,
             )
-            or re.search(r"def\s+\w+\([^)]*\):", content)
+            or re.search(r"def\s+\w+\([^)]*\)", content)
         )
 
     def generate_mutants(
@@ -273,10 +273,10 @@ class MutableDefaultsOperator(MutationOperator):
         for idx, line in enumerate(lines):
             # Target 1: Replace safe '= None' parameter with mutable default
             if re.search(r"def\s+\w+\(", line):
-                # Pattern: opts: Optional[dict] = None -> opts: dict = {}
-                if re.search(r"(\w+)\s*:\s*(?:Optional\[dict\]|dict)\s*=\s*None", line):
+                # Pattern: opts: Optional[dict] | dict | None = None -> opts: dict = {}
+                if re.search(r"(\w+)\s*:\s*(?:Optional\[dict\]|dict\s*\|\s*None|dict)\s*=\s*None", line):
                     mut_line = re.sub(
-                        r"(\w+)\s*:\s*(?:Optional\[dict\]|dict)\s*=\s*None",
+                        r"(\w+)\s*:\s*(?:Optional\[dict\]|dict\s*\|\s*None|dict)\s*=\s*None",
                         r"\1: dict = {}",
                         line,
                         count=1,
@@ -285,10 +285,10 @@ class MutableDefaultsOperator(MutationOperator):
                     if validate_syntax(new_code, file_path) is None:
                         mutants.append((new_code, f"Mutable default dict argument at line {idx+1}"))
 
-                # Pattern: items: Optional[list] = None -> items: list = []
-                elif re.search(r"(\w+)\s*:\s*(?:Optional\[list\]|list)\s*=\s*None", line):
+                # Pattern: items: Optional[list] | list | None = None -> items: list = []
+                elif re.search(r"(\w+)\s*:\s*(?:Optional\[list\]|list\s*\|\s*None|list)\s*=\s*None", line):
                     mut_line = re.sub(
-                        r"(\w+)\s*:\s*(?:Optional\[list\]|list)\s*=\s*None",
+                        r"(\w+)\s*:\s*(?:Optional\[list\]|list\s*\|\s*None|list)\s*=\s*None",
                         r"\1: list = []",
                         line,
                         count=1,
@@ -298,25 +298,34 @@ class MutableDefaultsOperator(MutationOperator):
                         mutants.append((new_code, f"Mutable default list argument at line {idx+1}"))
 
                 # Target 2: Append optional mutable memo parameter preserving caller compatibility
-                elif line.rstrip().endswith("):") and len(mutants) == 0:
-                    func_match = re.match(r"^(\s*def\s+\w+\((.*?)\)):", line.rstrip())
+                elif len(mutants) == 0:
+                    func_match = re.match(r"^(\s*def\s+\w+\((.*?)\))(\s*(?:->\s*[^:]+)?\s*:)", line.rstrip())
                     if func_match:
                         prefix = func_match.group(1)
                         params = func_match.group(2).strip()
+                        suffix = func_match.group(3)
                         if "_memo" not in params:
-                            sep = ", " if params else ""
-                            mut_header = f"{prefix[:-1]}{sep}_memo: dict = {{}}):\n"
-                            # Inject mutation into function body
-                            indent = " " * (len(line) - len(line.lstrip()) + 4)
-                            leak_stmt = f"{indent}_memo[str(len(_memo))] = True\n"
-                            new_code = (
-                                "".join(lines[:idx])
-                                + mut_header
-                                + leak_stmt
-                                + "".join(lines[idx + 1 :])
-                            )
-                            if validate_syntax(new_code, file_path) is None:
-                                mutants.append((new_code, f"Injected mutable default _memo at line {idx+1}"))
+                            if "**" in params:
+                                p_pre, p_post = params.rsplit("**", 1)
+                                mut_params = f"{p_pre}_memo: dict = {{}}, **{p_post}"
+                            else:
+                                sep = ", " if params else ""
+                                mut_params = f"{params}{sep}_memo: dict = {{}}"
+                            indent = " " * (len(line) - len(line.lstrip()))
+                            body_indent = " " * (len(line) - len(line.lstrip()) + 4)
+                            fn_name_match = re.match(r"^\s*def\s+(\w+)\(", prefix)
+                            if fn_name_match:
+                                fn_name = fn_name_match.group(1)
+                                mut_header = f"{indent}def {fn_name}({mut_params}){suffix}\n"
+                                leak_stmt = f"{body_indent}_memo[str(len(_memo))] = True\n"
+                                new_code = (
+                                    "".join(lines[:idx])
+                                    + mut_header
+                                    + leak_stmt
+                                    + "".join(lines[idx + 1 :])
+                                )
+                                if validate_syntax(new_code, file_path) is None:
+                                    mutants.append((new_code, f"Injected mutable default _memo at line {idx+1}"))
 
             if len(mutants) >= 3:
                 break
@@ -403,14 +412,19 @@ class OptionalChainingDriftOperator(MutationOperator):
 
             if language in ("typescript", "javascript"):
                 if "?." in line:
-                    mut_line = line.replace("?.", ".", 1)
+                    if "?.(" in line:
+                        mut_line = line.replace("?.(", "(", 1)
+                        desc = f"Optional invocation drift: '?.(' replaced with '(' at line {idx+1}"
+                    else:
+                        mut_line = line.replace("?.", ".", 1)
+                        desc = f"Optional chaining drift: '?.' replaced with '.' at line {idx+1}"
                     new_code = "".join(lines[:idx]) + mut_line + "".join(lines[idx + 1 :])
                     if validate_syntax(new_code, file_path) is None:
-                        mutants.append((new_code, f"Optional chaining drift: '?.' replaced with '.' at line {idx+1}"))
+                        mutants.append((new_code, desc))
 
             elif language == "python":
-                # Replace dict.get(key, default) -> dict[key]
-                match = re.search(r"(\w+)\.get\((['\"][^'\"]+['\"]),\s*[^)]+\)", line)
+                # Replace dict.get(key, default) or dict.get(key) -> dict[key]
+                match = re.search(r"(\w+)\.get\((['\"][^'\"]+['\"])(?:,\s*[^)]+)?\)", line)
                 if match:
                     dict_name = match.group(1)
                     key_expr = match.group(2)
@@ -442,7 +456,7 @@ class UnhandledChannelReadOperator(MutationOperator):
         if language == "go":
             return bool(re.search(r"\b(\w+),\s*(\w+)\s*:=\s*<-\s*(\w+)", content))
         elif language == "python":
-            return bool(re.search(r"\.get\(timeout=", content))
+            return bool(re.search(r"\.get\(timeout=", content) or re.search(r"\b\w+\.get\(\)", content))
         return False
 
     def generate_mutants(
@@ -456,20 +470,16 @@ class UnhandledChannelReadOperator(MutationOperator):
 
         for idx, line in enumerate(lines):
             if language == "go":
-                # Go: val, ok := <-ch -> val := <-ch
-                match = re.search(r"(\b\w+),\s*ok\s*:=\s*<-\s*(\w+)", line)
+                # Go: val, ok := <-ch or val, more := <-ch -> val := <-ch
+                match = re.search(r"\b(\w+),\s*(\w+)\s*:=\s*<-\s*(\w+)", line)
                 if match:
                     val_var = match.group(1)
-                    ch_var = match.group(2)
-                    mut_line = re.sub(
-                        r"\b\w+,\s*ok\s*:=\s*<-\s*\w+",
-                        f"{val_var} := <-{ch_var}",
-                        line,
-                        count=1,
-                    )
+                    bool_var = match.group(2)
+                    ch_var = match.group(3)
+                    mut_line = line.replace(match.group(0), f"{val_var} := <-{ch_var}", 1)
                     new_code = "".join(lines[:idx]) + mut_line + "".join(lines[idx + 1 :])
                     if validate_syntax(new_code, file_path) is None:
-                        mutants.append((new_code, f"Unhandled channel read: dropped 'ok' at line {idx+1}"))
+                        mutants.append((new_code, f"Unhandled channel read: dropped '{bool_var}' at line {idx+1}"))
 
             elif language == "python":
                 if ".get(timeout=" in line:
@@ -477,6 +487,11 @@ class UnhandledChannelReadOperator(MutationOperator):
                     new_code = "".join(lines[:idx]) + mut_line + "".join(lines[idx + 1 :])
                     if validate_syntax(new_code, file_path) is None:
                         mutants.append((new_code, f"Queue timeout dropped to get_nowait() at line {idx+1}"))
+                elif re.search(r"\b(\w+)\.get\(\)", line):
+                    mut_line = re.sub(r"\b(\w+)\.get\(\)", r"\1.get_nowait()", line, count=1)
+                    new_code = "".join(lines[:idx]) + mut_line + "".join(lines[idx + 1 :])
+                    if validate_syntax(new_code, file_path) is None:
+                        mutants.append((new_code, f"Queue get() dropped to get_nowait() at line {idx+1}"))
 
             if len(mutants) >= 3:
                 break
@@ -503,7 +518,7 @@ class UnclosedResourceOperator(MutationOperator):
                 or re.search(r"\b\w+\.close\(\)", content)
             )
         elif language == "go":
-            return bool(re.search(r"defer\s+\w+\.(Close|Unlock)\(\)", content))
+            return bool(re.search(r"defer\s+[\w.]+\.(Close|Unlock)\(\)", content))
         elif language in ("typescript", "javascript"):
             return bool(re.search(r"\b\w+\.(destroy|close|end)\(\)", content))
         elif language == "rust":
@@ -542,11 +557,11 @@ class UnclosedResourceOperator(MutationOperator):
                         mutants.append((new_code, f"Omitted close() at line {idx+1}"))
 
             elif language == "go":
-                if re.search(r"defer\s+\w+\.Close\(\)", line):
+                if re.search(r"defer\s+[\w.]+\.(?:Close|Unlock)\(\)", line):
                     mut_line = line.replace("defer ", "// defer ", 1)
                     new_code = "".join(lines[:idx]) + mut_line + "".join(lines[idx + 1 :])
                     if validate_syntax(new_code, file_path) is None:
-                        mutants.append((new_code, f"Go omitted defer Close() at line {idx+1}"))
+                        mutants.append((new_code, f"Go omitted defer cleanup at line {idx+1}"))
 
             elif language in ("typescript", "javascript"):
                 match = re.search(r"(\b\w+\.(?:destroy|close|end)\(\))", line)
@@ -658,9 +673,13 @@ class MutantHarvester:
             candidates = op.generate_mutants(str(file_path), orig_content, lang)
 
             for mutated_code, desc in candidates:
-                # 1. Deterministic Symbolic Gate Check (Stage 1 & 2 AST topology check)
                 try:
-                    rep_mut = self.engine.verify(rel_path, mutated_code, original_content=orig_content)
+                    rep_mut = self.engine.verify(
+                        rel_path,
+                        mutated_code,
+                        original_content=orig_content,
+                        is_replacement=True,
+                    )
                 except Exception:
                     continue
 
@@ -723,7 +742,12 @@ class MutantHarvester:
                 # Add harmless invariant comment to verify clean pass
                 comment_token = "#" if lang == "python" else "//"
                 clean_pass_code = f"{comment_token} topocache-clean-pass\n" + orig_content
-                rep_clean = self.engine.verify(rel_path, clean_pass_code, original_content=orig_content)
+                rep_clean = self.engine.verify(
+                    rel_path,
+                    clean_pass_code,
+                    original_content=orig_content,
+                    is_replacement=True,
+                )
 
                 pos_record = DatasetRecord(
                     input_dsl=rep_clean.linearized_subgraph,
@@ -766,13 +790,49 @@ class MutantHarvester:
         for lang in self.languages:
             allowed_exts.update(ext_map.get(lang, []))
 
+        ignored_dirs = {
+            "test",
+            "tests",
+            "__tests__",
+            "testing",
+            ".git",
+            ".code_oracle",
+            ".venv",
+            "venv",
+            "env",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            "dist",
+            "build",
+            "node_modules",
+            "target",
+            "vendor",
+        }
+        test_suffixes = (
+            "_test.py",
+            "_test.go",
+            "_test.rs",
+            ".test.ts",
+            ".test.tsx",
+            ".test.js",
+            ".test.jsx",
+            ".spec.ts",
+            ".spec.tsx",
+            ".spec.js",
+            ".spec.jsx",
+        )
+
         if target_dir.is_file():
             matching_files = [target_dir]
         else:
-            for root, _, files in os.walk(target_dir):
+            for root, dirs, files in os.walk(target_dir):
+                dirs[:] = [d for d in dirs if d.lower() not in ignored_dirs]
                 for f in files:
+                    if f.startswith("test_") or f.lower().endswith(test_suffixes):
+                        continue
                     ext = Path(f).suffix.lower()
-                    if ext in allowed_exts and not f.startswith("test_") and not f.endswith("_test.go"):
+                    if ext in allowed_exts:
                         matching_files.append(Path(root) / f)
 
         all_negatives: List[DatasetRecord] = []

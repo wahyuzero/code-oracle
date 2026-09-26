@@ -656,3 +656,56 @@ pub type UserResult<T> = Result<T, String>;
     assert "INSTANCE" in sym_map and sym_map["INSTANCE"].kind == "variable"
     assert "UserResult" in sym_map and sym_map["UserResult"].kind == "type_alias"
 
+
+def test_call_extraction_with_comments_multilang():
+    """Verify that comments placed inside function call argument lists do not inflate args_count."""
+    # TypeScript
+    ts_code = """
+    export function invoke() {
+        doSomething(
+            // leading comment explaining arg 1
+            firstArg,
+            /* inline comment */
+            secondArg
+        );
+    }
+    """
+    ts_syms = extract_symbols(ts_code, "service.ts")
+    ts_fn = next(s for s in ts_syms if s.name == "invoke")
+    ts_call = next(c for c in ts_fn.calls if c.callee == "doSomething")
+    assert ts_call.args_count == 2
+
+    # Go
+    go_code = """
+    package main
+    func Run() {
+        compute(
+            // first parameter comment
+            x,
+            /* second parameter comment */
+            y,
+        )
+    }
+    """
+    go_syms = extract_symbols(go_code, "main.go")
+    go_fn = next(s for s in go_syms if s.name == "Run")
+    go_call = next(c for c in go_fn.calls if c.callee == "compute")
+    assert go_call.args_count == 2
+
+    # Rust
+    rs_code = """
+    pub fn execute() {
+        process(
+            // first arg
+            a,
+            /* second arg */
+            b,
+        );
+    }
+    """
+    rs_syms = extract_symbols(rs_code, "main.rs")
+    rs_fn = next(s for s in rs_syms if s.name == "execute")
+    rs_call = next(c for c in rs_fn.calls if c.callee == "process")
+    assert rs_call.args_count == 2
+
+

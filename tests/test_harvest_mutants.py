@@ -345,3 +345,151 @@ def test_harvest_directory_and_export(project_with_tests: Path, tmp_path: Path):
     assert summary["passed"] is True, f"Violations reported: {summary['violations']}"
     assert summary["total_records"] == written
     assert summary["symbolic_gate"]["failed"] == 0
+
+
+def test_mutable_defaults_union_and_typed():
+    op = MutableDefaultsOperator()
+    # Python 3.10+ union types
+    code_union = (
+        "def configure(settings: dict | None = None, tags: list | None = None) -> None:\n"
+        "    pass\n"
+    )
+    assert op.can_mutate("config.py", code_union, "python")
+    mutants = op.generate_mutants("config.py", code_union, "python")
+    assert len(mutants) >= 1
+    assert "settings: dict = {}" in mutants[0][0]
+    assert validate_syntax(mutants[0][0], "config.py") is None
+
+    # Typed function with return annotation and **kwargs
+    code_kwargs = (
+        "def process_data(data: str, **kwargs) -> dict:\n"
+        "    return {'data': data}\n"
+    )
+    mutants_kw = op.generate_mutants("service.py", code_kwargs, "python")
+    assert len(mutants_kw) >= 1
+    mut_code = mutants_kw[0][0]
+    assert "_memo: dict = {}" in mut_code
+    assert validate_syntax(mut_code, "service.py") is None
+
+
+def test_optional_chaining_call_and_single_get():
+    op = OptionalChainingDriftOperator()
+    # TypeScript optional method invocation a?.()
+    ts_code = (
+        "export function notify(callback?: () => void): void {\n"
+        "    callback?.();\n"
+        "}\n"
+    )
+    assert op.can_mutate("event.ts", ts_code, "typescript")
+    ts_mutants = op.generate_mutants("event.ts", ts_code, "typescript")
+    assert len(ts_mutants) >= 1
+    assert "callback();" in ts_mutants[0][0]
+    assert validate_syntax(ts_mutants[0][0], "event.ts") is None
+
+    # Python single-argument dict.get(key)
+    py_code = (
+        "def get_user_name(profile: dict) -> str:\n"
+        "    return profile.get('name')\n"
+    )
+    assert op.can_mutate("user.py", py_code, "python")
+    py_mutants = op.generate_mutants("user.py", py_code, "python")
+    assert len(py_mutants) >= 1
+    assert "profile['name']" in py_mutants[0][0]
+    assert validate_syntax(py_mutants[0][0], "user.py") is None
+
+
+def test_unhandled_channel_read_custom_var_and_python_queue():
+    op = UnhandledChannelReadOperator()
+    # Go with arbitrary variable name (not just 'ok')
+    go_code = (
+        "package queue\n\n"
+        "func Read(ch <-chan string) string {\n"
+        "    msg, more := <-ch\n"
+        "    if !more {\n"
+        "        return \"\"\n"
+        "    }\n"
+        "    return msg\n"
+        "}\n"
+    )
+    assert op.can_mutate("queue.go", go_code, "go")
+    go_muts = op.generate_mutants("queue.go", go_code, "go")
+    assert len(go_muts) >= 1
+    assert "msg := <-ch" in go_muts[0][0]
+    assert validate_syntax(go_muts[0][0], "queue.go") is None
+
+    # Python blocking queue.get()
+    py_code = (
+        "import queue\n\n"
+        "def poll_task(q: queue.Queue):\n"
+        "    return q.get()\n"
+    )
+    assert op.can_mutate("worker.py", py_code, "python")
+    py_muts = op.generate_mutants("worker.py", py_code, "python")
+    assert len(py_muts) >= 1
+    assert "q.get_nowait()" in py_muts[0][0]
+    assert validate_syntax(py_muts[0][0], "worker.py") is None
+
+
+def test_unclosed_resource_selector_and_unlock():
+    op = UnclosedResourceOperator()
+    # Go selector defer resp.Body.Close()
+    go_code = (
+        "package client\n\n"
+        "import \"net/http\"\n\n"
+        "func Fetch(url string) (*http.Response, error) {\n"
+        "    resp, err := http.Get(url)\n"
+        "    if err != nil {\n"
+        "        return nil, err\n"
+        "    }\n"
+        "    defer resp.Body.Close()\n"
+        "    return resp, nil\n"
+        "}\n"
+    )
+    assert op.can_mutate("client.go", go_code, "go")
+    go_muts = op.generate_mutants("client.go", go_code, "go")
+    assert len(go_muts) >= 1
+    assert "// defer resp.Body.Close()" in go_muts[0][0]
+    assert validate_syntax(go_muts[0][0], "client.go") is None
+
+
+def test_harvest_directory_excludes_test_files(tmp_path: Path):
+    """Verify that test files and test directories are excluded from mutation."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir(parents=True, exist_ok=True)
+    node_modules = src_dir / "node_modules"
+    node_modules.mkdir(parents=True, exist_ok=True)
+
+    # Production file
+    (src_dir / "service.ts").write_text(
+        "export function check(valid: boolean): boolean {\n"
+        "    if (valid) { return true; }\n"
+        "    return false;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    # Test file that should be ignored
+    (src_dir / "service.test.ts").write_text(
+        "import { check } from './service';\n"
+        "if (check(true)) { console.log('ok'); }\n",
+        encoding="utf-8",
+    )
+    # Ignored directory file
+    (node_modules / "dep.ts").write_text(
+        "if (true) {}\n",
+        encoding="utf-8",
+    )
+
+    harvester = MutantHarvester(
+        workspace_root=tmp_path,
+        languages=["typescript"],
+        filter_symbolic_gate=True,
+    )
+    records = harvester.harvest_directory(target_dir=src_dir, max_samples=10, balance=False)
+    # Mutants should ONLY target service.ts, not service.test.ts or node_modules
+    assert len(records) >= 1
+    for r in records:
+        assert r.input_dsl.startswith("[DIFF_TARGET] src/service.ts")
+        assert "dep.ts" not in r.input_dsl
+

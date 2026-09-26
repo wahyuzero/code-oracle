@@ -349,20 +349,20 @@ class GitRevertMiner:
                             fn = fn.strip()
                             if not fn:
                                 continue
-                            d_cmd = ["git", "show", "-p", bug_hash, "--", fn]
+                            d_cmd = ["git", "show", "--format=", "-p", bug_hash, "--", fn]
                             d_res = subprocess.run(d_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
                             if d_res.returncode == 0 and d_res.stdout.strip():
                                 o_cmd = ["git", "show", f"{bug_hash}~1:{fn}"]
                                 o_res = subprocess.run(o_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                                orig_c = o_res.stdout if o_res.returncode == 0 else None
+                                orig_c = o_res.stdout if o_res.returncode == 0 else ""
 
                                 # Clean fix diff from revert commit
-                                rev_diff_cmd = ["git", "show", "-p", rev_hash, "--", fn]
+                                rev_diff_cmd = ["git", "show", "--format=", "-p", rev_hash, "--", fn]
                                 rev_diff_res = subprocess.run(rev_diff_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
                                 rev_diff = rev_diff_res.stdout if rev_diff_res.returncode == 0 else None
                                 rev_orig_cmd = ["git", "show", f"{rev_hash}~1:{fn}"]
                                 rev_orig_res = subprocess.run(rev_orig_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                                rev_orig = rev_orig_res.stdout if rev_orig_res.returncode == 0 else None
+                                rev_orig = rev_orig_res.stdout if rev_orig_res.returncode == 0 else ""
 
                                 file_tuples.append((fn, d_res.stdout, orig_c, rev_diff, rev_orig))
 
@@ -375,20 +375,20 @@ class GitRevertMiner:
                             fn = fn.strip()
                             if not fn:
                                 continue
-                            d_cmd = ["git", "show", "-R", "-p", rev_hash, "--", fn]
+                            d_cmd = ["git", "show", "--format=", "-R", "-p", rev_hash, "--", fn]
                             d_res = subprocess.run(d_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
                             if d_res.returncode == 0 and d_res.stdout.strip():
                                 o_cmd = ["git", "show", f"{rev_hash}:{fn}"]
                                 o_res = subprocess.run(o_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                                orig_c = o_res.stdout if o_res.returncode == 0 else None
+                                orig_c = o_res.stdout if o_res.returncode == 0 else ""
 
                                 # Clean fix diff is direct revert commit diff
-                                rev_diff_cmd = ["git", "show", "-p", rev_hash, "--", fn]
+                                rev_diff_cmd = ["git", "show", "--format=", "-p", rev_hash, "--", fn]
                                 rev_diff_res = subprocess.run(rev_diff_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
                                 rev_diff = rev_diff_res.stdout if rev_diff_res.returncode == 0 else None
                                 rev_orig_cmd = ["git", "show", f"{rev_hash}~1:{fn}"]
                                 rev_orig_res = subprocess.run(rev_orig_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                                rev_orig = rev_orig_res.stdout if rev_orig_res.returncode == 0 else None
+                                rev_orig = rev_orig_res.stdout if rev_orig_res.returncode == 0 else ""
 
                                 file_tuples.append((fn, d_res.stdout, orig_c, rev_diff, rev_orig))
 
@@ -528,11 +528,12 @@ class GitRevertMiner:
                     if "|" not in line:
                         continue
                     h_val, subj = line.split("|", 1)
-                    if re.search(r"(?i)\b(cve-\d{4}-\d+|ghsa-[a-z0-9-]+|vulnerability|security advisory)\b", subj):
-                        b_cmd = ["git", "show", "-s", "--format=%B", h_val]
-                        b_res = subprocess.run(b_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                        b_body = b_res.stdout if b_res.returncode == 0 else ""
-                        fix_commit_targets.append((h_val, "CVE/GHSA-LOCAL", f"{subj}\n{b_body}"))
+                    b_cmd = ["git", "show", "-s", "--format=%B", h_val]
+                    b_res = subprocess.run(b_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
+                    b_body = b_res.stdout if b_res.returncode == 0 else ""
+                    full_text = f"{subj}\n{b_body}"
+                    if re.search(r"(?i)\b(cve-\d{4}-\d+|ghsa-[a-z0-9-]+|vulnerability|vuln|security)\b", full_text):
+                        fix_commit_targets.append((h_val, "CVE/GHSA-LOCAL", full_text))
         except Exception:
             pass
 
@@ -556,12 +557,12 @@ class GitRevertMiner:
                     continue
 
                 # a) Negative sample: Vulnerable state (reverse diff of fix commit)
-                rev_cmd = ["git", "show", "-R", "-p", fix_hash, "--", fn]
+                rev_cmd = ["git", "show", "--format=", "-R", "-p", fix_hash, "--", fn]
                 rev_res = subprocess.run(rev_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
                 if rev_res.returncode == 0 and rev_res.stdout.strip():
                     o_cmd = ["git", "show", f"{fix_hash}:{fn}"]
                     o_res = subprocess.run(o_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                    orig_c = o_res.stdout if o_res.returncode == 0 else None
+                    orig_c = o_res.stdout if o_res.returncode == 0 else ""
 
                     try:
                         rep_vuln = engine.verify(fn, rev_res.stdout, original_content=orig_c)
@@ -603,12 +604,12 @@ class GitRevertMiner:
                         records.append(rec_neg)
 
                         # b) Positive sample: Security fix patch
-                        d_cmd = ["git", "show", "-p", fix_hash, "--", fn]
+                        d_cmd = ["git", "show", "--format=", "-p", fix_hash, "--", fn]
                         d_res = subprocess.run(d_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
                         if d_res.returncode == 0 and d_res.stdout.strip():
                             o_fix_cmd = ["git", "show", f"{fix_hash}~1:{fn}"]
                             o_fix_res = subprocess.run(o_fix_cmd, cwd=str(repo_path), capture_output=True, text=True, timeout=5)
-                            orig_fix_c = o_fix_res.stdout if o_fix_res.returncode == 0 else None
+                            orig_fix_c = o_fix_res.stdout if o_fix_res.returncode == 0 else ""
 
                             rep_fix = engine.verify(fn, d_res.stdout, original_content=orig_fix_c)
                             if rep_fix.status == "APPROVED":
@@ -678,6 +679,7 @@ def run_mining_pipeline(
     languages: Optional[List[str]] = None,
     max_samples_per_repo: int = 40,
     target_samples: int = 400,
+    depth: int = 250,
     include_osv: bool = True,
     offline: bool = False,
     seed: int = 42,
@@ -703,7 +705,7 @@ def run_mining_pipeline(
         if lang not in target_languages:
             continue
 
-        repo_path = ensure_repository_cloned(repo_info, cache_dir=cache_dir, offline=offline)
+        repo_path = ensure_repository_cloned(repo_info, cache_dir=cache_dir, depth=depth, offline=offline)
         if not repo_path or not (repo_path / ".git").exists():
             print(f"[!] Warning: Repository {name} not available locally, skipping...")
             continue
@@ -803,6 +805,12 @@ def main():
         dest="include_osv",
         help="Disable remote OSV API query.",
     )
+    parser.add_argument(
+        "--depth",
+        type=int,
+        default=250,
+        help="Git clone history depth when cloning target repositories.",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed for balancing.")
 
     args = parser.parse_args()
@@ -814,6 +822,7 @@ def main():
         languages=langs,
         max_samples_per_repo=args.max_samples_per_repo,
         target_samples=args.target_samples,
+        depth=args.depth,
         include_osv=args.include_osv,
         offline=args.offline,
         seed=args.seed,

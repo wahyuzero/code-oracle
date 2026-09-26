@@ -135,7 +135,7 @@ def _extract_calls(node: Node, source_bytes: bytes, caller_id: Optional[str] = N
             args_node = n.child_by_field_name("arguments")
             if args_node:
                 for arg in args_node.children:
-                    if arg.type in ("(", ")", ","):
+                    if arg.type in ("(", ")", ",", "comment", "line_comment", "block_comment") or "comment" in arg.type:
                         continue
                     args_count += 1
                     if arg.type == "spread_element":

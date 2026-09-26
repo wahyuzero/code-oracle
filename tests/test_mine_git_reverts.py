@@ -313,3 +313,62 @@ def test_inspect_file_on_mined_dataset(git_repo_with_reverts: Path, tmp_path: Pa
     assert summary["passed"] is True, f"Inspect file reported violations: {summary['violations']}"
     assert summary["symbolic_gate"]["failed"] == 0
     assert summary["total_records"] == len(records)
+
+
+def test_extract_cve_body_match(tmp_path: Path):
+    """Verify that CVE identifiers in commit bodies (not just subject) are discovered."""
+    repo_dir = tmp_path / "cve_body_repo"
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=str(repo_dir), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(repo_dir), check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(repo_dir), check=True)
+
+    f = repo_dir / "service.py"
+    f.write_text("def sanitize(x: str) -> str:\n    return x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo_dir), check=True)
+
+    f.write_text("def sanitize(x: str) -> str:\n    return x.strip()\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True)
+    # Generic subject, but CVE identifier in commit body
+    body_msg = "fix: update input filter\n\nResolves CVE-2024-9999 security vulnerability in parameter parser"
+    subprocess.run(["git", "commit", "-m", body_msg], cwd=str(repo_dir), check=True)
+
+    miner = GitRevertMiner(languages=["python"], filter_symbolic_gate=True)
+    records = miner.extract_cve_ghsa_pairs_from_repo(
+        repo_dir,
+        repo_info={"name": "cve_body_repo", "language": "python"},
+        max_samples=5,
+        query_osv=False,
+        offline=True,
+    )
+    assert len(records) >= 1
+    neg = next(r for r in records if r.label == 0)
+    assert neg.category == "security_surface"
+    assert neg.taxonomy_labels["SecuritySurface"] >= 0.85
+
+
+def test_cli_depth_parameter(monkeypatch, tmp_path: Path):
+    """Verify that --depth CLI parameter is accepted and forwarded."""
+    from mine_git_reverts import main
+    out_file = tmp_path / "out.jsonl"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mine_git_reverts.py",
+            "--cache-dir",
+            str(tmp_path),
+            "--output",
+            str(out_file),
+            "--target-samples",
+            "2",
+            "--depth",
+            "50",
+            "--offline",
+        ],
+    )
+    # Should run pipeline without raising argument errors
+    main()
+    assert out_file.exists()
+
