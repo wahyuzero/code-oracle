@@ -4,11 +4,13 @@
 > Structural AST topology validated by Tarjan SCC and Tyranid-BERT (164M INT8 decision model).
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![CI](https://github.com/wahyuzero/code-oracle/actions/workflows/ci.yml/badge.svg)](https://github.com/wahyuzero/code-oracle/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/code-oracle.svg?color=blue)](https://pypi.org/project/code-oracle/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/code-oracle.svg)](https://pypi.org/project/code-oracle/)
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Tyranid--BERT-yellow)](https://huggingface.co/wxsys/tyranid-bert)
+[![GitHub Release](https://img.shields.io/github/v/release/wahyuzero/code-oracle?color=brightgreen)](https://github.com/wahyuzero/code-oracle/releases/tag/v0.1.0)
 [![Inference Latency](https://img.shields.io/badge/Verification-<50ms_local-brightgreen.svg)](#key-characteristics)
 [![Token Waste](https://img.shields.io/badge/Output_Tokens-0_tokens-success.svg)](#key-characteristics)
-[![Paradigm](https://img.shields.io/badge/Architecture-Neuro--Symbolic-orange.svg)](#architecture)
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/code-oracle/)
-[![GitHub Release](https://img.shields.io/badge/release-v0.1.0-brightgreen.svg)](https://github.com/wahyuzero/code-oracle/releases/tag/v0.1.0)
 
 ---
 
@@ -112,6 +114,9 @@ pip install "code-oracle[neural]"
 # Full developer setup with test suites & packaging tools
 pip install "code-oracle[all]"
 ```
+
+> [!NOTE]
+> The core package is ultra-lightweight (~140 KB) and executes deterministic AST and Tarjan SCC verification with zero neural dependencies. The 145 MB Tyranid-BERT ONNX INT8 decision model is downloaded on-demand and cached to `~/.cache/code_oracle/weights/` only when `--neural` is invoked.
 
 ### 2. FastMCP Server for Coding Agents
 
