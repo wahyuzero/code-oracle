@@ -355,7 +355,15 @@ def verify_symbolic_gate(
     for imp in patch_result.imports:
         if (imp.module or imp.level > 0) and imp.name != "*":
             target_f = indexer.resolve_import_to_file(imp, patch_result.file_path)
-            if target_f and target_f in indexer._file_cache:
+            if not target_f:
+                mod_str = imp.module or ""
+                if mod_str.startswith("./") or mod_str.startswith("../") or imp.level > 0:
+                    violations.append(
+                        f"BROKEN_REFERENCE: Cannot resolve relative import '{mod_str}' in '{patch_result.file_path}' (line {imp.lineno}) - file does not exist."
+                    )
+                continue
+
+            if target_f in indexer._file_cache:
                 cached = indexer._file_cache[target_f]
                 defined_names = {s["name"] for s in cached.get("symbols", [])}
                 imported_names = {i.get("asname") or i["name"] for i in cached.get("imports", [])}
@@ -380,6 +388,11 @@ def verify_symbolic_gate(
                         target_dir / f"{imp.name}.go",
                     ]
                     has_symbol = any(c.exists() for c in submod_cands)
+                    if not has_symbol and target_f.endswith(".go"):
+                        # In Go, imports are package-level (e.g. import "scorp-agent/agent").
+                        # The identifier is the package namespace, which is valid if the package dir has Go files.
+                        if target_dir.is_dir() and any(target_dir.glob("*.go")):
+                            has_symbol = True
                     if not has_symbol and target_full.exists():
                         if target_f.endswith(".py"):
                             try:

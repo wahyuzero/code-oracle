@@ -6,7 +6,7 @@ Tarjan SCC cycle detection and contract invariant verification.
 import pytest
 
 from code_oracle.indexer import WorkspaceIndexer
-from code_oracle.models import CallReference, GateResult, Parameter, PatchResult, SlicedGraph, SliceNode, SliceEdge, Symbol
+from code_oracle.models import CallReference, GateResult, ImportReference, Parameter, PatchResult, SlicedGraph, SliceNode, SliceEdge, Symbol
 from code_oracle.symbolic import find_cycles_tarjan, verify_symbolic_gate
 
 
@@ -276,3 +276,73 @@ def test_gate_approved_clean_patch(tmp_path):
     assert res.confidence == 0.98
     assert res.violations == []
     assert res.cycles == []
+
+
+def test_gate_broken_relative_import(tmp_path):
+    (tmp_path / "main.ts").write_text(
+        """import { helper } from "./missing_submodule";
+""",
+        encoding="utf-8",
+    )
+    indexer = WorkspaceIndexer(workspace_root=tmp_path)
+    indexer.scan_workspace()
+
+    patch_result = PatchResult(
+        file_path="main.ts",
+        original_content="",
+        patched_content="import { helper } from './missing_submodule';",
+        imports=[
+            ImportReference(
+                module="./missing_submodule",
+                name="helper",
+                lineno=1,
+                file_path="main.ts",
+            )
+        ],
+    )
+    slice_graph = SlicedGraph()
+
+    res = verify_symbolic_gate(patch_result, slice_graph, indexer)
+    assert res.status == "REJECTED"
+    assert any("BROKEN_REFERENCE" in v for v in res.violations)
+    assert any("Cannot resolve relative import './missing_submodule'" in v for v in res.violations)
+
+
+def test_gate_go_package_import(tmp_path):
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "service.go").write_text(
+        """package pkg
+func DoWork() {}
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "main.go").write_text(
+        """package main
+import "example.com/pkg"
+func main() {}
+""",
+        encoding="utf-8",
+    )
+    indexer = WorkspaceIndexer(workspace_root=tmp_path)
+    indexer.scan_workspace()
+
+    patch_result = PatchResult(
+        file_path="main.go",
+        original_content="",
+        patched_content="import \"example.com/pkg\"",
+        imports=[
+            ImportReference(
+                module="example.com/pkg",
+                name="pkg",
+                lineno=2,
+                file_path="main.go",
+            )
+        ],
+    )
+    slice_graph = SlicedGraph()
+
+    res = verify_symbolic_gate(patch_result, slice_graph, indexer)
+    assert res.status == "APPROVED"
+    assert res.violations == []
+
