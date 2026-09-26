@@ -682,6 +682,7 @@ def run_mining_pipeline(
     depth: int = 250,
     include_osv: bool = True,
     offline: bool = False,
+    filter_symbolic_gate: bool = True,
     seed: int = 42,
 ) -> List[DatasetRecord]:
     """
@@ -694,7 +695,7 @@ def run_mining_pipeline(
     target_repos = repos_to_mine or TARGET_REVERT_REPOS
     target_languages = languages or ["python", "typescript", "go", "rust"]
 
-    miner = GitRevertMiner(languages=target_languages, filter_symbolic_gate=True, seed=seed)
+    miner = GitRevertMiner(languages=target_languages, filter_symbolic_gate=filter_symbolic_gate, seed=seed)
     all_records: List[DatasetRecord] = []
 
     print(f"[*] Starting Git Revert & GHSA/CVE Mining Pipeline across {len(target_repos)} repositories...")
@@ -743,7 +744,7 @@ def run_mining_pipeline(
         from code_oracle.dataset import DatasetGenerator
         needed = target_samples - len(balanced_records)
         print(f"[*] Supplementing {needed} balanced subtle samples to achieve target {target_samples}...")
-        synth_gen = DatasetGenerator(languages=target_languages, seed=seed, filter_symbolic_gate=True)
+        synth_gen = DatasetGenerator(languages=target_languages, seed=seed, filter_symbolic_gate=filter_symbolic_gate)
         synth_samples = synth_gen.generate_synthetic_dataset(num_samples=needed, include_subtle=True)
         all_pool = balanced_records + synth_samples
         balanced_records = balance_revert_dataset(all_pool, target_count=target_samples, seed=seed)
@@ -806,6 +807,12 @@ def main():
         help="Disable remote OSV API query.",
     )
     parser.add_argument(
+        "--filter-symbolic-gate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Filter out candidates that fail Stage 1 AST or Stage 2 topological checks.",
+    )
+    parser.add_argument(
         "--depth",
         type=int,
         default=250,
@@ -825,6 +832,7 @@ def main():
         depth=args.depth,
         include_osv=args.include_osv,
         offline=args.offline,
+        filter_symbolic_gate=args.filter_symbolic_gate,
         seed=args.seed,
     )
 
