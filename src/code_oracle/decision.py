@@ -156,11 +156,12 @@ class ModernBERTMultiTaskModel(nn.Module):
         log_variance: torch.Tensor,
         delta: float = 0.1,
         pos_weight: Optional[torch.Tensor] = None,
+        risk_pos_weight: float = 1.0,
         homoscedastic_weights: Optional[Tuple[float, float, float]] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Compute unified multi-task loss:
-        - L_risk: Huber loss (delta=0.1)
+        - L_risk: Huber loss (delta=0.1) with optional asymmetric risk weighting (risk_pos_weight)
         - L_tax: BCEWithLogitsLoss (with optional pos_weight)
         - L_unc: Heteroscedastic negative log-likelihood:
                  0.5 * exp(-s) * (risk_target - risk_pred)^2 + 0.5 * s
@@ -171,8 +172,12 @@ class ModernBERTMultiTaskModel(nn.Module):
         log_variance = log_variance.view(-1, 1)
         taxonomy_target = taxonomy_target.float()
 
-        # 1. Continuous Risk Huber Loss
-        l_risk = F.huber_loss(risk_pred, risk_target, delta=delta)
+        # 1. Continuous Risk Huber Loss (with optional asymmetric risk weighting)
+        if risk_pos_weight > 1.0:
+            risk_weight = torch.where(risk_target >= 0.5, risk_pos_weight, 1.0)
+            l_risk = torch.mean(risk_weight * F.huber_loss(risk_pred, risk_target, delta=delta, reduction="none"))
+        else:
+            l_risk = F.huber_loss(risk_pred, risk_target, delta=delta)
 
         # 2. Multi-Label Taxonomy Loss
         l_tax = F.binary_cross_entropy_with_logits(taxonomy_logits, taxonomy_target, pos_weight=pos_weight)

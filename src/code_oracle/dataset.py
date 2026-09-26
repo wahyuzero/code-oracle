@@ -9,6 +9,7 @@ import os
 import random
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -2028,6 +2029,28 @@ TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
 }
 
 
+TARGETED_MUTATIONS_MAP: Dict[str, Tuple[str, str, str]] = {
+    # TypeScript Targeted Subtle Mutations (Langkah 3)
+    # a) Type widening & any escape
+    "ts_type_widening_service": ("ts_type_widening_patch", "breaking_public_api", "BreakingPublicAPI"),
+    # b) Unchecked optional chaining drift
+    "ts_optional_chaining_service": ("ts_optional_chaining_patch", "silent_logic_drift", "SilentLogicDrift"),
+    # c) Promise/async unhandled floating rejection
+    "ts_floating_promise_service": ("ts_floating_promise_patch", "concurrency_hazard", "ConcurrencyHazard"),
+    # d) Object property deletion / dynamic destructuring alteration
+    "ts_destructuring_service": ("ts_destructuring_patch", "breaking_public_api", "BreakingPublicAPI"),
+    # Python Targeted Subtle Mutations (Langkah 3)
+    # a) Keyword argument drift (**kwargs and parameter renaming/omission)
+    "py_kwargs_service": ("py_kwargs_drift_patch", "breaking_public_api", "BreakingPublicAPI"),
+    # b) Mutable default arguments & dictionary mutation drift
+    "py_mutable_default_service": ("py_mutable_default_patch", "performance_regression", "PerformanceRegression"),
+    # c) Truthiness and silent logic drift (is None vs truthy check)
+    "py_truthiness_service": ("py_truthiness_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
+    # d) Revert-mimicking subtle patches (inverts security sanitization hotfix)
+    "py_revert_mimic_service": ("py_revert_mimic_patch", "real_revert", "SecuritySurface"),
+}
+
+
 class DatasetGenerator:
     """
     Synthesizes and mines balanced datasets of Micro-DSL representations
@@ -2164,23 +2187,17 @@ class DatasetGenerator:
             # Subtle semantic mutations mapped to ADR-0003 5-class risk taxonomy
             # (Gray-area hard negatives that pass Stage 1 & 2 symbolic gate)
             if include_subtle or self.filter_symbolic_gate:
-                subtle_mutations = [
-                    ("silent_logic_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
-                    ("security_surface_patch", "security_surface", "SecuritySurface"),
-                    ("concurrency_hazard_patch", "concurrency_hazard", "ConcurrencyHazard"),
-                    ("performance_regression_patch", "performance_regression", "PerformanceRegression"),
-                    ("breaking_public_api_patch", "breaking_public_api", "BreakingPublicAPI"),
-                    # Targeted TypeScript subtle mutations (Langkah 3)
-                    ("ts_type_widening_patch", "breaking_public_api", "BreakingPublicAPI"),
-                    ("ts_optional_chaining_patch", "silent_logic_drift", "SilentLogicDrift"),
-                    ("ts_floating_promise_patch", "concurrency_hazard", "ConcurrencyHazard"),
-                    ("ts_destructuring_patch", "breaking_public_api", "BreakingPublicAPI"),
-                    # Targeted Python subtle mutations (Langkah 3)
-                    ("py_kwargs_drift_patch", "breaking_public_api", "BreakingPublicAPI"),
-                    ("py_mutable_default_patch", "performance_regression", "PerformanceRegression"),
-                    ("py_truthiness_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
-                    ("py_revert_mimic_patch", "real_revert", "SecuritySurface"),
-                ]
+                tmpl_name = template.get("name", "")
+                if tmpl_name in TARGETED_MUTATIONS_MAP:
+                    subtle_mutations = [TARGETED_MUTATIONS_MAP[tmpl_name]]
+                else:
+                    subtle_mutations = [
+                        ("silent_logic_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
+                        ("security_surface_patch", "security_surface", "SecuritySurface"),
+                        ("concurrency_hazard_patch", "concurrency_hazard", "ConcurrencyHazard"),
+                        ("performance_regression_patch", "performance_regression", "PerformanceRegression"),
+                        ("breaking_public_api_patch", "breaking_public_api", "BreakingPublicAPI"),
+                    ]
                 seen_patches = set()
                 for patch_key, cat_name, tax_class in subtle_mutations:
                     patch_content = template.get(patch_key)
@@ -2229,7 +2246,10 @@ class DatasetGenerator:
         d) Object property deletion / dynamic destructuring alteration (ts_destructuring_service)
         100% compliant with Stage 1-2 symbolic gate (symbolic_gate_passed=True).
         """
-        ts_templates = [t for t in TEMPLATES.get("typescript", []) if t["name"].startswith("ts_")]
+        ts_templates = [
+            t for t in TEMPLATES.get("typescript", [])
+            if t["name"] in TARGETED_MUTATIONS_MAP
+        ]
         records: List[DatasetRecord] = []
         for i in range(count_per_type):
             for tmpl in ts_templates:
@@ -2253,7 +2273,10 @@ class DatasetGenerator:
         d) Revert-mimicking subtle patches (py_revert_mimic_service)
         100% compliant with Stage 1-2 symbolic gate (symbolic_gate_passed=True).
         """
-        py_templates = [t for t in TEMPLATES.get("python", []) if t["name"].startswith("py_")]
+        py_templates = [
+            t for t in TEMPLATES.get("python", [])
+            if t["name"] in TARGETED_MUTATIONS_MAP
+        ]
         records: List[DatasetRecord] = []
         for i in range(count_per_type):
             for tmpl in py_templates:
@@ -2289,33 +2312,33 @@ class DatasetGenerator:
     ) -> Tuple[List[DatasetRecord], List[DatasetRecord]]:
         """
         Expand training and validation datasets with targeted TypeScript and Python subtle mutations.
-        Maintains exact 50% PASS / 50% REJECT class balance across both splits,
+        Maintains exact 50% PASS / 50% REJECT class balance across both splits and per language,
         and guarantees 100% symbolic gate compliance (symbolic_gate_passed=True).
         """
-        # 4 templates per language, each yields 1 pos and 1 neg per variation
-        ts_count_per_type = max(1, (num_ts_samples // 2) // 4)
-        py_count_per_type = max(1, (num_py_samples // 2) // 4)
+        ts_templates = [t for t in TEMPLATES.get("typescript", []) if t["name"] in TARGETED_MUTATIONS_MAP]
+        py_templates = [t for t in TEMPLATES.get("python", []) if t["name"] in TARGETED_MUTATIONS_MAP]
+
+        ts_count_per_type = max(1, (num_ts_samples // 2) // max(1, len(ts_templates)))
+        py_count_per_type = max(1, (num_py_samples // 2) // max(1, len(py_templates)))
 
         ts_records = self.generate_targeted_typescript_mutations(count_per_type=ts_count_per_type)
         py_records = self.generate_targeted_python_mutations(count_per_type=py_count_per_type)
 
-        all_new = ts_records + py_records
-        all_new = [r for r in all_new if r.symbolic_gate_passed]
+        new_train: List[DatasetRecord] = []
+        new_val: List[DatasetRecord] = []
 
-        new_pos = [r for r in all_new if r.label == self.positive_label]
-        new_neg = [r for r in all_new if r.label == self.negative_label]
+        # Stratified balance per language ensures Python samples are never crowded out by TypeScript
+        for lang_recs in (ts_records, py_records):
+            valid = [r for r in lang_recs if r.symbolic_gate_passed]
+            pos = [r for r in valid if r.label == self.positive_label]
+            neg = [r for r in valid if r.label == self.negative_label]
+            min_n = min(len(pos), len(neg))
+            pos = pos[:min_n]
+            neg = neg[:min_n]
 
-        # Balance new positive and negative samples
-        min_new = min(len(new_pos), len(new_neg))
-        chosen_pos = new_pos[:min_new]
-        chosen_neg = new_neg[:min_new]
-
-        # Split into train and val maintaining exact balance
-        val_pos_n = max(1, int(len(chosen_pos) * val_ratio))
-        val_neg_n = val_pos_n
-
-        new_val = chosen_pos[:val_pos_n] + chosen_neg[:val_neg_n]
-        new_train = chosen_pos[val_pos_n:] + chosen_neg[val_neg_n:]
+            val_n = max(1, int(min_n * val_ratio))
+            new_val.extend(pos[:val_n] + neg[:val_n])
+            new_train.extend(pos[val_n:] + neg[val_n:])
 
         expanded_train = list(train_records) + new_train
         expanded_val = list(val_records) + new_val
@@ -3148,3 +3171,69 @@ class DatasetGenerator:
                 f.write(json.dumps(rec.to_dict()) + "\n")
 
         return len(train_records), len(val_records)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entrypoint for dataset generation and targeted mutations."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Mine and generate balanced multi-language training datasets for Code Oracle / Laya ModernBERT.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--repo", type=Path, default=None, help="Path to an existing code repository to mine.")
+    parser.add_argument("--output-dir", "-o", type=Path, default=Path("./dataset_output"), help="Directory to emit dataset files.")
+    parser.add_argument("--num-samples", "-n", type=int, default=100, help="Target total number of balanced samples.")
+    parser.add_argument("--val-ratio", type=float, default=0.2, help="Fraction allocated to validation set.")
+    parser.add_argument("--languages", "-l", type=str, default="python,typescript,go,rust", help="Comma-separated languages.")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+    parser.add_argument("--positive-label", type=int, default=1, help="Positive label.")
+    parser.add_argument("--negative-label", type=int, default=0, help="Negative label.")
+    parser.add_argument("--filter-symbolic-gate", action="store_true", default=False, help="Filter mutations that fail symbolic gate.")
+    parser.add_argument("--include-subtle", action="store_true", default=True, help="Include subtle mutations.")
+    parser.add_argument("--no-subtle", dest="include_subtle", action="store_false", help="Disable subtle mutations.")
+    parser.add_argument("--targeted", action="store_true", default=False, help="Generate targeted subtle mutations for TypeScript and Python.")
+
+    args = parser.parse_args(argv)
+    lang_list = [l.strip().lower() for l in args.languages.split(",") if l.strip()]
+
+    generator = DatasetGenerator(
+        languages=lang_list,
+        seed=args.seed,
+        positive_label=args.positive_label,
+        negative_label=args.negative_label,
+        filter_symbolic_gate=args.filter_symbolic_gate,
+    )
+
+    if args.targeted:
+        print(f"[*] Generating targeted mutations for languages: {', '.join(lang_list)}...")
+        records = generator.generate_targeted_mutations(
+            languages=lang_list,
+            count_per_type=max(1, (args.num_samples // 2) // (4 * max(1, len(lang_list)))),
+        )
+        print(f"[+] Successfully generated {len(records)} targeted mutation records.")
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        train_file = args.output_dir / "dataset_train.jsonl"
+        val_file = args.output_dir / "dataset_val.jsonl"
+        val_count = max(1, int(len(records) * args.val_ratio))
+        val_recs = records[:val_count]
+        train_recs = records[val_count:]
+        with open(train_file, "w", encoding="utf-8") as f:
+            for r in train_recs:
+                f.write(json.dumps(r.to_dict()) + "\n")
+        with open(val_file, "w", encoding="utf-8") as f:
+            for r in val_recs:
+                f.write(json.dumps(r.to_dict()) + "\n")
+        return 0
+
+    train_count, val_count = generator.generate_and_export(
+        output_dir=args.output_dir,
+        num_samples=args.num_samples,
+        val_ratio=args.val_ratio,
+        repo_path=args.repo,
+        include_subtle=args.include_subtle,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

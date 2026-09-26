@@ -664,13 +664,13 @@ def test_targeted_typescript_mutation_generators():
     gen = DatasetGenerator(languages=["typescript"], seed=42)
     records = gen.generate_targeted_typescript_mutations(count_per_type=1)
 
-    assert len(records) > 0
+    assert len(records) == 8  # 4 templates x (1 pass + 1 subtle mutation)
 
     # Separate positive and negative records
     negatives = [r for r in records if r.label == 0]
     positives = [r for r in records if r.label == 1]
-    assert len(negatives) > 0
-    assert len(positives) > 0
+    assert len(negatives) == 4
+    assert len(positives) == 4
 
     # 1. 100% symbolic gate compliance (symbolic_gate_passed=True)
     for r in records:
@@ -693,6 +693,11 @@ def test_targeted_typescript_mutation_generators():
     assert has_drift, "Expected SilentLogicDrift taxonomy to be activated for optional chaining"
     assert has_conc, "Expected ConcurrencyHazard taxonomy to be activated for floating promise"
 
+    # 4. Verify all 4 specific targeted templates are represented
+    ts_symbols = {"parseUserProfile", "validateSessionToken", "logAuditEvent", "sanitizeCustomerAccount"}
+    found_symbols = {sym for sym in ts_symbols if any(sym in r.input_dsl for r in negatives)}
+    assert found_symbols == ts_symbols, f"Missing targeted TS templates: {ts_symbols - found_symbols}"
+
 
 def test_targeted_python_mutation_generators():
     """Verify targeted subtle mutation generators for Python (Langkah 3)."""
@@ -701,12 +706,12 @@ def test_targeted_python_mutation_generators():
     gen = DatasetGenerator(languages=["python"], seed=42)
     records = gen.generate_targeted_python_mutations(count_per_type=1)
 
-    assert len(records) > 0
+    assert len(records) == 8  # 4 templates x (1 pass + 1 subtle mutation)
 
     negatives = [r for r in records if r.label == 0]
     positives = [r for r in records if r.label == 1]
-    assert len(negatives) > 0
-    assert len(positives) > 0
+    assert len(negatives) == 4
+    assert len(positives) == 4
 
     # 1. 100% symbolic gate compliance
     for r in records:
@@ -732,9 +737,14 @@ def test_targeted_python_mutation_generators():
     assert has_drift, "Expected SilentLogicDrift taxonomy for truthiness drift"
     assert has_sec, "Expected SecuritySurface taxonomy for revert mimic"
 
+    # 4. Verify all 4 specific targeted templates are represented
+    py_symbols = {"configure_engine", "lookup_cache_entry", "check_threshold", "sanitize_user_input"}
+    found_symbols = {sym for sym in py_symbols if any(sym in r.input_dsl for r in negatives)}
+    assert found_symbols == py_symbols, f"Missing targeted Python templates: {py_symbols - found_symbols}"
+
 
 def test_targeted_dataset_expansion_integrity():
-    """Verify expand_dataset preserves exact class balance and 100% symbolic gate compliance."""
+    """Verify expand_dataset preserves exact class balance and 100% symbolic gate compliance across languages."""
     gen = DatasetGenerator(languages=["typescript", "python"], seed=42)
 
     # Initial small datasets (balanced)
@@ -767,6 +777,17 @@ def test_targeted_dataset_expansion_integrity():
     # Verify 100% symbolic gate compliance
     assert all(r.symbolic_gate_passed is True for r in exp_train + exp_val)
 
+    # Verify BOTH TypeScript and Python have negative samples in train and val (no crowding out)
+    py_train_neg = sum(1 for r in exp_train if r.language == "python" and r.label == 0)
+    ts_train_neg = sum(1 for r in exp_train if r.language == "typescript" and r.label == 0)
+    assert py_train_neg > 1, f"Python negative samples missing in train: {py_train_neg}"
+    assert ts_train_neg > 0, f"TypeScript negative samples missing in train: {ts_train_neg}"
+
+    py_val_neg = sum(1 for r in exp_val if r.language == "python" and r.label == 0)
+    ts_val_neg = sum(1 for r in exp_val if r.language == "typescript" and r.label == 0)
+    assert py_val_neg > 1, f"Python negative samples missing in val: {py_val_neg}"
+    assert ts_val_neg > 0, f"TypeScript negative samples missing in val: {ts_val_neg}"
+
 
 def test_targeted_mutations_cli_dispatch():
     """Verify generate_targeted_mutations dispatches correctly across languages."""
@@ -776,13 +797,50 @@ def test_targeted_mutations_cli_dispatch():
     langs = {r.language for r in both}
     assert "typescript" in langs
     assert "python" in langs
-    assert len(both) > 0
+    assert len(both) == 16  # 8 TS + 8 Python
 
     ts_only = gen.generate_targeted_mutations(languages=["typescript"], count_per_type=1)
     assert all(r.language == "typescript" for r in ts_only)
+    assert len(ts_only) == 8
 
     py_only = gen.generate_targeted_mutations(languages=["python"], count_per_type=1)
     assert all(r.language == "python" for r in py_only)
+    assert len(py_only) == 8
+
+
+def test_targeted_cli_execution():
+    """Verify CLI flags --targeted works from python -m code_oracle.dataset and tools/dataset_generator.py."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        res = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "code_oracle.dataset",
+                "--targeted",
+                "--languages",
+                "typescript,python",
+                "--num-samples",
+                "16",
+                "--output-dir",
+                str(tmp),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, f"CLI error: {res.stderr}"
+        train_file = tmp / "dataset_train.jsonl"
+        val_file = tmp / "dataset_val.jsonl"
+        assert train_file.exists()
+        assert val_file.exists()
+
+        with open(train_file, "r", encoding="utf-8") as f:
+            lines = [json.loads(l) for l in f]
+        assert len(lines) > 0
+        assert all(r["symbolic_gate_passed"] is True for r in lines)
+        assert any(r["language"] == "typescript" for r in lines)
+        assert any(r["language"] == "python" for r in lines)
+
 
 
 

@@ -118,6 +118,20 @@ def test_multitask_model_compute_loss():
     )
     assert weighted_loss["loss_total"].item() > 0.0
 
+    # Test with pos_weight and risk_pos_weight re-weighting (Langkah 4)
+    pos_weight = torch.ones(5) * 1.8
+    reweighted_loss = model.compute_loss(
+        risk_pred=risk_pred,
+        risk_target=risk_target,
+        taxonomy_logits=taxonomy_logits,
+        taxonomy_target=taxonomy_target,
+        log_variance=log_variance,
+        pos_weight=pos_weight,
+        risk_pos_weight=1.8,
+    )
+    assert reweighted_loss["loss_total"].item() > 0.0
+    assert reweighted_loss["loss_risk"].item() > loss_dict["loss_risk"].item()
+
 
 def test_decision_head_predict_multi_task_approved():
     head = LayaDecisionHead(weights_path=None)

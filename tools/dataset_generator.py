@@ -88,6 +88,12 @@ def main() -> int:
         action="store_false",
         help="Disable subtle gray-area semantic mutations.",
     )
+    parser.add_argument(
+        "--targeted",
+        action="store_true",
+        default=False,
+        help="Generate targeted subtle mutations for TypeScript and Python (Langkah 3).",
+    )
 
     args = parser.parse_args()
 
@@ -101,6 +107,31 @@ def main() -> int:
         negative_label=args.negative_label,
         filter_symbolic_gate=args.filter_symbolic_gate,
     )
+
+    if args.targeted:
+        print(f"[*] Generating targeted mutations for languages: {', '.join(lang_list)}...")
+        records = generator.generate_targeted_mutations(
+            languages=lang_list,
+            count_per_type=max(1, (args.num_samples // 2) // (4 * max(1, len(lang_list)))),
+        )
+        print(f"[+] Successfully generated {len(records)} targeted mutation records.")
+        import json
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        train_file = args.output_dir / "dataset_train.jsonl"
+        val_file = args.output_dir / "dataset_val.jsonl"
+        val_count = max(1, int(len(records) * args.val_ratio))
+        val_recs = records[:val_count]
+        train_recs = records[val_count:]
+        with open(train_file, "w", encoding="utf-8") as f:
+            for r in train_recs:
+                f.write(json.dumps(r.to_dict()) + "\n")
+        with open(val_file, "w", encoding="utf-8") as f:
+            for r in val_recs:
+                f.write(json.dumps(r.to_dict()) + "\n")
+        print(f"[+] Written targeted datasets to {args.output_dir}:")
+        print(f"    - dataset_train.jsonl: {len(train_recs)} samples")
+        print(f"    - dataset_val.jsonl:   {len(val_recs)} samples")
+        return 0
 
     print(f"[*] Generating dataset (target: {args.num_samples} samples, val_ratio: {args.val_ratio})...")
     train_count, val_count = generator.generate_and_export(
