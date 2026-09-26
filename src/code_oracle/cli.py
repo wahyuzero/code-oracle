@@ -40,10 +40,12 @@ def format_report_pretty(report_dict: dict) -> str:
     risk_str = f" | Risk Score: {risk:.4f}" if risk is not None else ""
     unc = report_dict.get("epistemic_uncertainty")
     unc_str = f" | Uncertainty: {unc:.4f}" if unc is not None else ""
+    engine_mode = report_dict.get("engine_mode")
+    engine_str = f" [Engine: {engine_mode}]" if engine_mode else ""
 
     lines = [
         f"{color_prefix}===================================================={color_reset}",
-        f"{color_prefix} VERDICT: {status} (Confidence: {conf}{risk_str}{unc_str}) in {latency} ms{color_reset}",
+        f"{color_prefix} VERDICT: {status} (Confidence: {conf}{risk_str}{unc_str}){engine_str} in {latency} ms{color_reset}",
         f"{color_prefix}===================================================={color_reset}",
     ]
 
@@ -441,6 +443,65 @@ def cmd_dataset(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export_onnx(args: argparse.Namespace) -> int:
+    """Export ModernBERT PyTorch weights to ONNX FP32 and dynamic INT8 formats."""
+    from code_oracle.export_onnx import export_and_quantize
+
+    weights_dir = args.weights
+    if not weights_dir:
+        cand = Path.cwd() / "weights_base"
+        if cand.exists():
+            weights_dir = str(cand)
+        else:
+            from code_oracle.decision import LayaDecisionHead
+            head = LayaDecisionHead(enabled=True)
+            if head.weights_path:
+                weights_dir = str(head.weights_path)
+            else:
+                print("Error: Could not resolve model weights directory. Use --weights <path>.", file=sys.stderr)
+                return 1
+
+    out_dir = args.output_dir or weights_dir
+
+    try:
+        summary = export_and_quantize(
+            weights_path=weights_dir,
+            output_dir=out_dir,
+            quantize_int8=args.quantize_int8,
+            verify_parity=args.verify_parity,
+            opset_version=args.opset,
+        )
+        if args.json:
+            print(json.dumps(summary, indent=2))
+        else:
+            print("====================================================")
+            print(" ONNX EXPORT & QUANTIZATION REPORT")
+            print("====================================================")
+            print(f" Output Directory:    {summary['output_dir']}")
+            print(f" Model ONNX (FP32):   {summary['model_onnx']} ({summary['fp32_size_mb']:.2f} MB)")
+            if summary.get("model_int8_onnx"):
+                print(f" Model ONNX (INT8):   {summary['model_int8_onnx']} ({summary['int8_size_mb']:.2f} MB)")
+            print(f" Total Elapsed Time:  {summary['elapsed_seconds']:.2f} s")
+            parity = summary.get("parity")
+            if parity:
+                print("----------------------------------------------------")
+                print(f" Parity Status:       {parity.get('status', 'UNKNOWN')}")
+                print(f" FP32 Parity Pass:    {parity.get('fp32_parity_pass')}")
+                print(f" Max FP32 Risk Diff:  {parity.get('max_fp32_risk_diff'):.6e}")
+                if summary.get("model_int8_onnx"):
+                    print(f" INT8 Parity Pass:    {parity.get('int8_parity_pass')}")
+                    print(f" Max INT8 Risk Diff:  {parity.get('max_int8_risk_diff'):.6f}")
+                print(f" Samples Evaluated:   {parity.get('samples_tested')}")
+            print("====================================================")
+        return 0
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"status": "FAILED", "error": str(exc)}, indent=2))
+        else:
+            print(f"Error during ONNX export: {exc}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -668,8 +729,49 @@ def build_parser() -> argparse.ArgumentParser:
     p_h_run.add_argument("--workspace", "-w", help="Workspace root directory")
     p_h_run.add_argument("--mode", choices=["block", "warn"], default=None, help="Override mode (block or warn)")
     p_h_run.add_argument("--k", type=int, default=1, help="k-hop neighborhood radius (default: 1)")
-    p_h_run.add_argument("--json", action="store_true", help="Output machine-readable JSON")
-    p_h_run.set_defaults(func=cmd_hook_run)
+    # export-onnx
+    p_export = subparsers.add_parser(
+        "export-onnx",
+        help="Export ModernBERT PyTorch weights to ONNX FP32 and dynamic INT8 formats",
+    )
+    p_export.add_argument(
+        "--weights",
+        "-w",
+        default=None,
+        help="Source directory containing PyTorch model weights (default: weights_base or auto-resolved)",
+    )
+    p_export.add_argument(
+        "--output-dir",
+        "-o",
+        default=None,
+        help="Destination directory for exported ONNX models (default: weights directory)",
+    )
+    p_export.add_argument(
+        "--no-int8",
+        dest="quantize_int8",
+        action="store_false",
+        default=True,
+        help="Skip dynamic INT8 quantization",
+    )
+    p_export.add_argument(
+        "--no-verify",
+        dest="verify_parity",
+        action="store_false",
+        default=True,
+        help="Skip numeric parity verification against PyTorch",
+    )
+    p_export.add_argument(
+        "--opset",
+        type=int,
+        default=17,
+        help="ONNX opset version (default: 17)",
+    )
+    p_export.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON",
+    )
+    p_export.set_defaults(func=cmd_export_onnx)
 
     return parser
 

@@ -215,6 +215,7 @@ class EnhancedVerificationReport:
     affected_symbols: List[str]
     latency_ms: float
     is_neural_calibrated: bool = False
+    engine_mode: str = "heuristic"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert report to JSON-serializable dictionary with backward compatibility."""
@@ -231,5 +232,6 @@ class EnhancedVerificationReport:
             "affected_symbols": self.affected_symbols,
             "latency_ms": round(self.latency_ms, 2),
             "is_neural_calibrated": self.is_neural_calibrated,
+            "engine_mode": self.engine_mode,
         }
 

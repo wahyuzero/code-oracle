@@ -195,6 +195,7 @@ class TopoSliceEngine:
                 affected_symbols=[s.qualname for s in seed_symbols],
                 latency_ms=elapsed_ms,
                 is_neural_calibrated=decision_res.is_neural_calibrated,
+                engine_mode=decision_res.engine_mode,
             )
         finally:
             # Restore indexer to default disk state (Rollback Resilience)
@@ -415,6 +416,7 @@ class TopoSliceEngine:
                 affected_symbols=list(dict.fromkeys(all_affected_symbols)),
                 latency_ms=elapsed_ms,
                 is_neural_calibrated=decision_res.is_neural_calibrated,
+                engine_mode=decision_res.engine_mode,
             )
         finally:
             # Restore indexer to default disk state (Rollback Resilience)
