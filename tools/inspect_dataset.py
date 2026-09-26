@@ -44,6 +44,14 @@ VALID_CATEGORIES = {
     "real_revert",
     "real_hotfix",
     "clean_commit",
+    # Surviving mutant categories
+    "surviving_mutant",
+    "truthiness_inversion",
+    "mutable_defaults",
+    "floating_promises",
+    "optional_chaining_drift",
+    "unhandled_channel_read",
+    "unclosed_resource",
 }
 
 VALID_TAXONOMY_CLASSES = {

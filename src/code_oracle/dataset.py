@@ -193,6 +193,7 @@ DEFAULT_TOP_REPOS: List[Dict[str, str]] = [
     {"language": "python", "name": "fastapi", "url": "https://github.com/tiangolo/fastapi.git"},
     {"language": "python", "name": "pydantic", "url": "https://github.com/pydantic/pydantic.git"},
     {"language": "python", "name": "requests", "url": "https://github.com/psf/requests.git"},
+    {"language": "python", "name": "werkzeug", "url": "https://github.com/pallets/werkzeug.git"},
     {"language": "python", "name": "starlette", "url": "https://github.com/encode/starlette.git"},
     # TypeScript
     {"language": "typescript", "name": "hono", "url": "https://github.com/honojs/hono.git"},
@@ -234,6 +235,8 @@ KNOWN_REPOS: Dict[str, Dict[str, str]] = {
     "psf/requests": {"language": "python", "name": "requests", "url": "https://github.com/psf/requests.git"},
     "starlette": {"language": "python", "name": "starlette", "url": "https://github.com/encode/starlette.git"},
     "encode/starlette": {"language": "python", "name": "starlette", "url": "https://github.com/encode/starlette.git"},
+    "werkzeug": {"language": "python", "name": "werkzeug", "url": "https://github.com/pallets/werkzeug.git"},
+    "pallets/werkzeug": {"language": "python", "name": "werkzeug", "url": "https://github.com/pallets/werkzeug.git"},
     # Python - Held-out
     "flask": {"language": "python", "name": "flask", "url": "https://github.com/pallets/flask.git"},
     "pallets/flask": {"language": "python", "name": "flask", "url": "https://github.com/pallets/flask.git"},
