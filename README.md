@@ -1,7 +1,7 @@
 # Code Oracle
 
-> Sub-50ms neuro-symbolic verification for AI coding agents.  
-> Structural AST topology validated by Tarjan SCC and Tyranid-BERT (164M INT8 decision model).
+> In-memory patch verification for AI coding agents.  
+> Deterministic AST topology via Tarjan SCC and sub-20ms semantic risk calibration via Tyranid-BERT (164M INT8).
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![CI](https://github.com/wahyuzero/code-oracle/actions/workflows/ci.yml/badge.svg)](https://github.com/wahyuzero/code-oracle/actions/workflows/ci.yml)
@@ -26,9 +26,9 @@ When coding agents (Claude Code, Cursor, OpenCode, Codex) inspect code modificat
 
 ## Architecture
 
-Code Oracle decouples code generation from verification. It runs locally as an independent evaluation layer.
+Code Oracle separates code generation from verification, running in-process as an offline gatekeeper.
 
-Instead of generating conversational critiques, Code Oracle constructs a localized AST graph using Tree-sitter, checks topological invariants symbolically, and evaluates residual drift using Tyranid-BERT (a 164M parameter ModernBERT multi-task decision model quantized to INT8).
+Tree-sitter builds a localized AST graph from the diff. Tarjan's strongly connected components algorithm checks topological cycles and contract invariants symbolically. For structurally valid patches, Tyranid-BERT (a 164M parameter ModernBERT multi-task model quantized to INT8) scores semantic risk and multi-label taxonomy vectors in under 20 milliseconds on CPU.
 
 ### Verification Pipeline
 
@@ -61,10 +61,10 @@ flowchart TD
 
 ## Key Characteristics
 
-* **Sub-50ms Target Latency:** In-memory execution using ONNX Runtime or MLX on local CPU and Apple Silicon.
-* **Zero Output Token Tax:** Emits structured status codes and calibrated probability vectors (`Pass`, `Fail`, `Risk Score`) without text generation.
-* **Lean Tool Surface:** Exposes a single endpoint (`verify_patch`), avoiding multi-tool schema overhead in agent context.
-* **Offline Execution:** Runs without external API calls or network egress.
+* **In-Memory Execution:** Evaluates diffs on local CPU via standalone ONNX Runtime. Latency runs under 8 ms for Stage 1-2 symbolic checks and under 20 ms for Stage 3 neural scoring.
+* **Zero Token Overhead:** Returns structured status codes and calibrated probability vectors (`Pass`, `Fail`, `Risk Score`) without autoregressive text generation.
+* **Minimal MCP Surface:** Exposes a single focused verification endpoint (`verify_patch`), saving agent context window tokens.
+* **Fully Offline:** Operates without external API calls, cloud telemetry, or network access.
 
 ---
 
@@ -84,10 +84,10 @@ flowchart TD
 
 Code Oracle operates within explicit technical boundaries:
 
-1. **Evaluator, Not Author:** Code Oracle does not generate, autocomplete, or refactor code. It evaluates proposed patches against existing syntax and topology.
-2. **Syntax Requirement:** Patches must produce a valid Tree-sitter AST. Syntactically invalid inputs fail at Stage 1 before invoking the decision model.
-3. **Static Topology Bounds:** Focuses on structural invariants, dependency cycles, and interface compatibility. It does not replace dynamic test suites, integration environments, or runtime race condition detectors.
-4. **Memory Footprint:** Requires only ~150 MB of RAM for the INT8 quantized ONNX model, running on commodity CPUs with standalone `onnxruntime` (Zero-PyTorch dependency).
+1. **Verification Only:** Code Oracle validates proposed edits against existing syntax and graph topology. It does not generate, autocomplete, or rewrite source code.
+2. **Syntax Gate:** Proposed changes must parse into a valid Tree-sitter AST. Syntax errors fail at Stage 1 before invoking graph traversals or neural evaluation.
+3. **Static Topology Focus:** Checks structural invariants, dependency cycles, and interface contracts. It complements rather than replaces integration test suites or dynamic runtime profilers.
+4. **Hardware Footprint:** Requires ~150 MB of RAM for INT8 quantized inference via standalone `onnxruntime` on CPU. Zero PyTorch or GPU hardware required.
 
 ---
 
@@ -116,7 +116,7 @@ pip install "code-oracle[all]"
 ```
 
 > [!NOTE]
-> The core package is ultra-lightweight (~140 KB) and executes deterministic AST and Tarjan SCC verification with zero neural dependencies. The 145 MB Tyranid-BERT ONNX INT8 decision model is downloaded on-demand and cached to `~/.cache/code_oracle/weights/` only when `--neural` is invoked.
+> The core wheel is 142 KB and runs deterministic AST and Tarjan SCC verification with zero neural dependencies. The 145 MB Tyranid-BERT ONNX INT8 model is downloaded on-demand and cached to `~/.cache/code_oracle/weights/` on first execution with `--neural`.
 
 ### 2. FastMCP Server for Coding Agents
 
