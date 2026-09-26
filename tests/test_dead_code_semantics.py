@@ -5,10 +5,9 @@ detector integration, suppression, CLI, and FastMCP server interface.
 """
 
 from pathlib import Path
-import pytest
 from unittest.mock import MagicMock
-
-import torch
+import pytest
+torch = pytest.importorskip("torch")
 
 from code_oracle.dead_code.detector import DeadCodeDetector, detect_dead_code
 from code_oracle.dead_code.models import (

@@ -7,7 +7,7 @@ EnhancedDecisionResult, EnhancedVerificationReport, TopoSliceEngine integration,
 import math
 from pathlib import Path
 import pytest
-import torch
+torch = pytest.importorskip("torch")
 
 from code_oracle.decision import (
     EnhancedDecisionResult,

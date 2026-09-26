@@ -13,11 +13,12 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import numpy as np
-import onnx
-import onnxruntime as ort
 import pytest
-import torch
+
+np = pytest.importorskip("numpy")
+onnx = pytest.importorskip("onnx")
+ort = pytest.importorskip("onnxruntime")
+torch = pytest.importorskip("torch")
 
 from code_oracle.decision import (
     EnhancedDecisionResult,
