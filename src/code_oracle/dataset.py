@@ -1784,6 +1784,595 @@ TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
                 "}\n"
             ),
         },
+        {
+            "name": "go_channel_service",
+            "files": {
+                "chan_mgr.go": (
+                    "package main\n\n"
+                    "type ChannelManager struct {\n"
+                    "    Jobs chan int\n"
+                    "}\n\n"
+                    "func NewManager(size int) *ChannelManager {\n"
+                    "    return &ChannelManager{Jobs: make(chan int, size)}\n"
+                    "}\n\n"
+                    "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                    "    select {\n"
+                    "    case m.Jobs <- item:\n"
+                    "        return true\n"
+                    "    default:\n"
+                    "        return false\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                "worker.go": (
+                    "package main\n\n"
+                    "func Dispatch(m *ChannelManager, val int) bool {\n"
+                    "    return m.Enqueue(val)\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "chan_mgr.go",
+            "target_symbol": "Enqueue",
+            "caller_file": "worker.go",
+            "caller_symbol": "Dispatch",
+            "pass_patch": (
+                "package main\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n\n"
+                "func NewManager(size int) *ChannelManager {\n"
+                "    return &ChannelManager{Jobs: make(chan int, size)}\n"
+                "}\n\n"
+                "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                "    // Non-blocking safe enqueue\n"
+                "    select {\n"
+                "    case m.Jobs <- item:\n"
+                "        return true\n"
+                "    default:\n"
+                "        return false\n"
+                "    }\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n\n"
+                "func (m *ChannelManager) Enqueue(item int, priority bool) bool {\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func Dispatch(m *ChannelManager, val int) bool {\n"
+                "    return m.Enqueue(val, true, false)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                "    Dispatch(m, item)\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n\n"
+                "func NewManager(size int) *ChannelManager {\n"
+                "    return &ChannelManager{Jobs: make(chan int, size)}\n"
+                "}\n\n"
+                "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                "    if item < 0 {\n"
+                "        return false\n"
+                "    }\n"
+                "    select {\n"
+                "    case m.Jobs <- item:\n"
+                "        return true\n"
+                "    default:\n"
+                "        return true // silent drop logic drift\n"
+                "    }\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "import \"os/exec\"\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n\n"
+                "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                "    exec.Command(\"sh\", \"-c\", \"echo task\").Run()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n\n"
+                "func NewManager(size int) *ChannelManager {\n"
+                "    return &ChannelManager{Jobs: make(chan int, size)}\n"
+                "}\n\n"
+                "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                "    go func() {\n"
+                "        m.Jobs <- item\n"
+                "    }()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "import \"time\"\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n\n"
+                "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                "    time.Sleep(5 * time.Millisecond)\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n\n"
+                "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                "    return false\n"
+                "}\n"
+            ),
+            "go_channel_leak_patch": (
+                "package main\n\n"
+                "type ChannelManager struct {\n"
+                "    Jobs chan int\n"
+                "}\n\n"
+                "func NewManager(size int) *ChannelManager {\n"
+                "    return &ChannelManager{Jobs: make(chan int, size)}\n"
+                "}\n\n"
+                "func (m *ChannelManager) Enqueue(item int) bool {\n"
+                "    unbuf := make(chan int)\n"
+                "    go func() {\n"
+                "        unbuf <- item\n"
+                "    }()\n"
+                "    return true\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "go_resource_service",
+            "files": {
+                "resource.go": (
+                    "package main\n\n"
+                    "import \"os\"\n\n"
+                    "type FileResource struct {\n"
+                    "    Path string\n"
+                    "}\n\n"
+                    "func (r *FileResource) ReadHeader() (int, error) {\n"
+                    "    f, err := os.Open(r.Path)\n"
+                    "    if err != nil {\n"
+                    "        return 0, err\n"
+                    "    }\n"
+                    "    defer f.Close()\n"
+                    "    return 100, nil\n"
+                    "}\n"
+                ),
+                "client.go": (
+                    "package main\n\n"
+                    "func AccessResource(r *FileResource) (int, error) {\n"
+                    "    return r.ReadHeader()\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "resource.go",
+            "target_symbol": "ReadHeader",
+            "caller_file": "client.go",
+            "caller_symbol": "AccessResource",
+            "pass_patch": (
+                "package main\n\n"
+                "import \"os\"\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n\n"
+                "func (r *FileResource) ReadHeader() (int, error) {\n"
+                "    // Safely reads file and ensures cleanup\n"
+                "    f, err := os.Open(r.Path)\n"
+                "    if err != nil {\n"
+                "        return 0, err\n"
+                "    }\n"
+                "    defer f.Close()\n"
+                "    return 100, nil\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n\n"
+                "func (r *FileResource) ReadHeader(bufSize int) (int, error) {\n"
+                "    return bufSize, nil\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func AccessResource(r *FileResource) (int, error) {\n"
+                "    return r.ReadHeader(1024, 2048)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "func (r *FileResource) ReadHeader() (int, error) {\n"
+                "    return AccessResource(r)\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "import \"os\"\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n\n"
+                "func (r *FileResource) ReadHeader() (int, error) {\n"
+                "    f, err := os.Open(r.Path)\n"
+                "    if err != nil {\n"
+                "        return -1, nil // swallowed error logic drift\n"
+                "    }\n"
+                "    defer f.Close()\n"
+                "    return 100, nil\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "import \"os/exec\"\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n\n"
+                "func (r *FileResource) ReadHeader() (int, error) {\n"
+                "    exec.Command(\"cat\", r.Path).Run()\n"
+                "    return 100, nil\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "var activeHandles int\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n\n"
+                "func (r *FileResource) ReadHeader() (int, error) {\n"
+                "    go func() {\n"
+                "        activeHandles++\n"
+                "    }()\n"
+                "    return 100, nil\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "import \"os\"\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n\n"
+                "func (r *FileResource) ReadHeader() (int, error) {\n"
+                "    f, err := os.Open(r.Path)\n"
+                "    if err != nil {\n"
+                "        return 0, err\n"
+                "    }\n"
+                "    // Descriptor leak via omitted defer Close\n"
+                "    _ = f\n"
+                "    return 100, nil\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n\n"
+                "func (r *FileResource) ReadHeader() (int, error) {\n"
+                "    return 0, nil\n"
+                "}\n"
+            ),
+            "go_resource_leak_patch": (
+                "package main\n\n"
+                "import \"os\"\n\n"
+                "type FileResource struct {\n"
+                "    Path string\n"
+                "}\n\n"
+                "func (r *FileResource) ReadHeader() (int, error) {\n"
+                "    f, err := os.Open(r.Path)\n"
+                "    if err != nil {\n"
+                "        return 0, err\n"
+                "    }\n"
+                "    _ = f\n"
+                "    return 100, nil\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "go_truthiness_service",
+            "files": {
+                "auth.go": (
+                    "package main\n\n"
+                    "type AuthSession struct {\n"
+                    "    UID string\n"
+                    "    Role string\n"
+                    "}\n\n"
+                    "func (a *AuthSession) IsAuthorized() bool {\n"
+                    "    if a == nil || a.UID == \"\" {\n"
+                    "        return false\n"
+                    "    }\n"
+                    "    return a.Role == \"admin\"\n"
+                    "}\n"
+                ),
+                "guard.go": (
+                    "package main\n\n"
+                    "func CheckAccess(a *AuthSession) bool {\n"
+                    "    return a.IsAuthorized()\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "auth.go",
+            "target_symbol": "IsAuthorized",
+            "caller_file": "guard.go",
+            "caller_symbol": "CheckAccess",
+            "pass_patch": (
+                "package main\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "    Role string\n"
+                "}\n\n"
+                "func (a *AuthSession) IsAuthorized() bool {\n"
+                "    // Validates authentication session\n"
+                "    if a == nil || a.UID == \"\" {\n"
+                "        return false\n"
+                "    }\n"
+                "    return a.Role == \"admin\"\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "}\n\n"
+                "func (a *AuthSession) IsAuthorized(scope string) bool {\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func CheckAccess(a *AuthSession) bool {\n"
+                "    return a.IsAuthorized(\"admin\", \"read\")\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "func (a *AuthSession) IsAuthorized() bool {\n"
+                "    return CheckAccess(a)\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "    Role string\n"
+                "}\n\n"
+                "func (a *AuthSession) IsAuthorized() bool {\n"
+                "    if a == nil {\n"
+                "        return true // Inverted null check logic drift\n"
+                "    }\n"
+                "    return a.Role == \"admin\"\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "    Role string\n"
+                "}\n\n"
+                "func (a *AuthSession) IsAuthorized() bool {\n"
+                "    if a != nil {\n"
+                "        return true\n"
+                "    }\n"
+                "    return false\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "var accessCount int\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "    Role string\n"
+                "}\n\n"
+                "func (a *AuthSession) IsAuthorized() bool {\n"
+                "    go func() {\n"
+                "        accessCount++\n"
+                "    }()\n"
+                "    return a.Role == \"admin\"\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "    Role string\n"
+                "}\n\n"
+                "func (a *AuthSession) IsAuthorized() bool {\n"
+                "    for i := 0; i < 500; i++ {\n"
+                "        _ = i\n"
+                "    }\n"
+                "    return a.Role == \"admin\"\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "}\n\n"
+                "func (a *AuthSession) IsAuthorized() bool {\n"
+                "    return false\n"
+                "}\n"
+            ),
+            "go_truthiness_drift_patch": (
+                "package main\n\n"
+                "type AuthSession struct {\n"
+                "    UID string\n"
+                "    Role string\n"
+                "}\n\n"
+                "func (a *AuthSession) IsAuthorized() bool {\n"
+                "    if a == nil || a.UID == \"\" {\n"
+                "        return true\n"
+                "    }\n"
+                "    return a.Role != \"admin\"\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "go_api_service",
+            "files": {
+                "api.go": (
+                    "package main\n\n"
+                    "type ApiResponse struct {\n"
+                    "    Code int\n"
+                    "    Data string\n"
+                    "}\n\n"
+                    "func NewResponse(code int, msg string) *ApiResponse {\n"
+                    "    return &ApiResponse{Code: code, Data: msg}\n"
+                    "}\n"
+                ),
+                "handler.go": (
+                    "package main\n\n"
+                    "func Handle() *ApiResponse {\n"
+                    "    return NewResponse(200, \"OK\")\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "api.go",
+            "target_symbol": "NewResponse",
+            "caller_file": "handler.go",
+            "caller_symbol": "Handle",
+            "pass_patch": (
+                "package main\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "    Data string\n"
+                "}\n\n"
+                "func NewResponse(code int, msg string) *ApiResponse {\n"
+                "    // Encapsulates standard HTTP response\n"
+                "    return &ApiResponse{Code: code, Data: msg}\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "    Data string\n"
+                "}\n\n"
+                "func NewResponse(code int, msg string, err string) *ApiResponse {\n"
+                "    return &ApiResponse{Code: code, Data: msg}\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func Handle() *ApiResponse {\n"
+                "    return NewResponse(200, \"OK\", \"extra\", \"err\")\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "func NewResponse(code int, msg string) *ApiResponse {\n"
+                "    return Handle()\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "    Data string\n"
+                "}\n\n"
+                "func NewResponse(code int, msg string) *ApiResponse {\n"
+                "    if code == 200 {\n"
+                "        return &ApiResponse{Code: 204, Data: \"\"} // silent payload strip\n"
+                "    }\n"
+                "    return &ApiResponse{Code: code, Data: msg}\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "    Data string\n"
+                "}\n\n"
+                "func NewResponse(code int, msg string) *ApiResponse {\n"
+                "    return &ApiResponse{Code: code, Data: msg + \" DEBUG_SECRET=123\"}\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "var reqCounter int\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "    Data string\n"
+                "}\n\n"
+                "func NewResponse(code int, msg string) *ApiResponse {\n"
+                "    go func() {\n"
+                "        reqCounter++\n"
+                "    }()\n"
+                "    return &ApiResponse{Code: code, Data: msg}\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "    Data string\n"
+                "}\n\n"
+                "func NewResponse(code int, msg string) *ApiResponse {\n"
+                "    for i := 0; i < 300; i++ {\n"
+                "        _ = i\n"
+                "    }\n"
+                "    return &ApiResponse{Code: code, Data: msg}\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "}\n\n"
+                "func NewResponse(code int, msg string) *ApiResponse {\n"
+                "    return &ApiResponse{Code: 500, Data: \"Error\"}\n"
+                "}\n"
+            ),
+            "go_api_drift_patch": (
+                "package main\n\n"
+                "type ApiResponse struct {\n"
+                "    Code int\n"
+                "    Data string\n"
+                "}\n\n"
+                "func NewResponse(code int, msg string) *ApiResponse {\n"
+                "    return &ApiResponse{Code: code, Data: \"DEPRECATED\"}\n"
+                "}\n"
+            ),
+        },
     ],
     "rust": [
         {
@@ -2028,6 +2617,607 @@ TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
                 "}\n"
             ),
         },
+        {
+            "name": "rust_concurrency_service",
+            "files": {
+                "sync_queue.rs": (
+                    "pub struct TaskQueue {\n"
+                    "    pub count: usize,\n"
+                    "}\n\n"
+                    "impl TaskQueue {\n"
+                    "    pub fn push(&mut self, val: i32) -> bool {\n"
+                    "        self.count += 1;\n"
+                    "        let _ = val;\n"
+                    "        true\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                "pipeline.rs": (
+                    "mod sync_queue;\n"
+                    "use sync_queue::TaskQueue;\n\n"
+                    "pub fn submit(q: &mut TaskQueue, task: i32) -> bool {\n"
+                    "    q.push(task)\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "sync_queue.rs",
+            "target_symbol": "push",
+            "caller_file": "pipeline.rs",
+            "caller_symbol": "submit",
+            "pass_patch": (
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32) -> bool {\n"
+                "        // Enqueue task safely\n"
+                "        self.count += 1;\n"
+                "        let _ = val;\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32, priority: bool) -> bool {\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "mod sync_queue;\n"
+                "use sync_queue::TaskQueue;\n\n"
+                "pub fn submit(q: &mut TaskQueue, task: i32) -> bool {\n"
+                "    q.push(task, true, false)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "mod pipeline;\n\n"
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32) -> bool {\n"
+                "        pipeline::submit(self, val);\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32) -> bool {\n"
+                "        if val < 0 {\n"
+                "            return false;\n"
+                "        }\n"
+                "        self.count += 1;\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "use std::process::Command;\n\n"
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32) -> bool {\n"
+                "        let _ = Command::new(\"echo\").arg(\"queue\").output();\n"
+                "        self.count += 1;\n"
+                "        let _ = val;\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "static mut GLOBAL_QUEUE_SIZE: usize = 0;\n\n"
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32) -> bool {\n"
+                "        unsafe {\n"
+                "            GLOBAL_QUEUE_SIZE += 1;\n"
+                "        }\n"
+                "        self.count += 1;\n"
+                "        let _ = val;\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32) -> bool {\n"
+                "        for _ in 0..500 {\n"
+                "            std::hint::black_box(1);\n"
+                "        }\n"
+                "        self.count += 1;\n"
+                "        let _ = val;\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32) -> bool {\n"
+                "        false\n"
+                "    }\n"
+                "}\n"
+            ),
+            "rust_concurrency_hazard_patch": (
+                "static mut SHARED_LOCK_ID: u32 = 0;\n\n"
+                "pub struct TaskQueue {\n"
+                "    pub count: usize,\n"
+                "}\n\n"
+                "impl TaskQueue {\n"
+                "    pub fn push(&mut self, val: i32) -> bool {\n"
+                "        unsafe {\n"
+                "            SHARED_LOCK_ID = SHARED_LOCK_ID.wrapping_add(1);\n"
+                "        }\n"
+                "        self.count += 1;\n"
+                "        let _ = val;\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "rust_resource_service",
+            "files": {
+                "buffer.rs": (
+                    "pub struct DataBuffer {\n"
+                    "    pub size: usize,\n"
+                    "}\n\n"
+                    "impl DataBuffer {\n"
+                    "    pub fn allocate(size: usize) -> Self {\n"
+                    "        DataBuffer { size }\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                "writer.rs": (
+                    "mod buffer;\n"
+                    "use buffer::DataBuffer;\n\n"
+                    "pub fn init_buffer(cap: usize) -> DataBuffer {\n"
+                    "    DataBuffer::allocate(cap)\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "buffer.rs",
+            "target_symbol": "allocate",
+            "caller_file": "writer.rs",
+            "caller_symbol": "init_buffer",
+            "pass_patch": (
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize) -> Self {\n"
+                "        // Safe buffer constructor\n"
+                "        DataBuffer { size }\n"
+                "    }\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize, tag: &str) -> Self {\n"
+                "        DataBuffer { size }\n"
+                "    }\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "mod buffer;\n"
+                "use buffer::DataBuffer;\n\n"
+                "pub fn init_buffer(cap: usize) -> DataBuffer {\n"
+                "    DataBuffer::allocate(cap, \"raw\", 100)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "mod writer;\n\n"
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize) -> Self {\n"
+                "        writer::init_buffer(size)\n"
+                "    }\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize) -> Self {\n"
+                "        if size > 1000 {\n"
+                "            return DataBuffer { size: 1000 };\n"
+                "        }\n"
+                "        DataBuffer { size }\n"
+                "    }\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize) -> Self {\n"
+                "        let _raw = Box::into_raw(Box::new(size));\n"
+                "        DataBuffer { size }\n"
+                "    }\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "static mut BUF_ALLOC_COUNT: usize = 0;\n\n"
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize) -> Self {\n"
+                "        unsafe { BUF_ALLOC_COUNT += 1; }\n"
+                "        DataBuffer { size }\n"
+                "    }\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize) -> Self {\n"
+                "        let leaked = Box::leak(Box::new(vec![0u8; 1000]));\n"
+                "        let _ = leaked;\n"
+                "        DataBuffer { size }\n"
+                "    }\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize) -> Self {\n"
+                "        DataBuffer { size: 0 }\n"
+                "    }\n"
+                "}\n"
+            ),
+            "rust_resource_leak_patch": (
+                "pub struct DataBuffer {\n"
+                "    pub size: usize,\n"
+                "}\n\n"
+                "impl DataBuffer {\n"
+                "    pub fn allocate(size: usize) -> Self {\n"
+                "        let leaked = Box::leak(Box::new(size));\n"
+                "        DataBuffer { size: *leaked }\n"
+                "    }\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "rust_truthiness_service",
+            "files": {
+                "validator.rs": (
+                    "pub struct Session {\n"
+                    "    pub token: String,\n"
+                    "    pub is_valid: bool,\n"
+                    "}\n\n"
+                    "impl Session {\n"
+                    "    pub fn authenticate(&self) -> bool {\n"
+                    "        if self.token.is_empty() {\n"
+                    "            return false;\n"
+                    "        }\n"
+                    "        self.is_valid\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                "checker.rs": (
+                    "mod validator;\n"
+                    "use validator::Session;\n\n"
+                    "pub fn verify_session(s: &Session) -> bool {\n"
+                    "    s.authenticate()\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "validator.rs",
+            "target_symbol": "authenticate",
+            "caller_file": "checker.rs",
+            "caller_symbol": "verify_session",
+            "pass_patch": (
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self) -> bool {\n"
+                "        // Verifies session validity\n"
+                "        if self.token.is_empty() {\n"
+                "            return false;\n"
+                "        }\n"
+                "        self.is_valid\n"
+                "    }\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self, scope: &str) -> bool {\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "mod validator;\n"
+                "use validator::Session;\n\n"
+                "pub fn verify_session(s: &Session) -> bool {\n"
+                "    s.authenticate(\"admin\", \"read\")\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "mod checker;\n\n"
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self) -> bool {\n"
+                "        checker::verify_session(self)\n"
+                "    }\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self) -> bool {\n"
+                "        if self.token.is_empty() {\n"
+                "            return true; // inverted truthiness\n"
+                "        }\n"
+                "        self.is_valid\n"
+                "    }\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self) -> bool {\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "static mut AUTH_CHECKS: usize = 0;\n\n"
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self) -> bool {\n"
+                "        unsafe { AUTH_CHECKS += 1; }\n"
+                "        self.is_valid\n"
+                "    }\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self) -> bool {\n"
+                "        let mut sum = 0;\n"
+                "        for i in 0..500 {\n"
+                "            sum += i;\n"
+                "        }\n"
+                "        let _ = sum;\n"
+                "        self.is_valid\n"
+                "    }\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self) -> bool {\n"
+                "        false\n"
+                "    }\n"
+                "}\n"
+            ),
+            "rust_truthiness_drift_patch": (
+                "pub struct Session {\n"
+                "    pub token: String,\n"
+                "    pub is_valid: bool,\n"
+                "}\n\n"
+                "impl Session {\n"
+                "    pub fn authenticate(&self) -> bool {\n"
+                "        if !self.token.is_empty() {\n"
+                "            return false;\n"
+                "        }\n"
+                "        !self.is_valid\n"
+                "    }\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "rust_api_service",
+            "files": {
+                "api_client.rs": (
+                    "pub struct Client {\n"
+                    "    pub host: String,\n"
+                    "}\n\n"
+                    "impl Client {\n"
+                    "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                    "        !endpoint.is_empty() && !self.host.is_empty()\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                "app.rs": (
+                    "mod api_client;\n"
+                    "use api_client::Client;\n\n"
+                    "pub fn execute_request(c: &Client) -> bool {\n"
+                    "    c.dispatch(\"/health\")\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "api_client.rs",
+            "target_symbol": "dispatch",
+            "caller_file": "app.rs",
+            "caller_symbol": "execute_request",
+            "pass_patch": (
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                "        // Dispatches HTTP request to endpoint\n"
+                "        !endpoint.is_empty() && !self.host.is_empty()\n"
+                "    }\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str, retries: u32) -> bool {\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "mod api_client;\n"
+                "use api_client::Client;\n\n"
+                "pub fn execute_request(c: &Client) -> bool {\n"
+                "    c.dispatch(\"/health\", 3, 5)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "mod app;\n\n"
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                "        let _ = endpoint;\n"
+                "        app::execute_request(self)\n"
+                "    }\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                "        if endpoint == \"/health\" {\n"
+                "            return false;\n"
+                "        }\n"
+                "        !endpoint.is_empty() && !self.host.is_empty()\n"
+                "    }\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "use std::process::Command;\n\n"
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                "        let _ = Command::new(\"curl\").arg(endpoint).output();\n"
+                "        true\n"
+                "    }\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "static mut REQ_COUNT: usize = 0;\n\n"
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                "        unsafe { REQ_COUNT += 1; }\n"
+                "        !endpoint.is_empty()\n"
+                "    }\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                "        for _ in 0..400 {\n"
+                "            std::hint::black_box(endpoint);\n"
+                "        }\n"
+                "        !endpoint.is_empty()\n"
+                "    }\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                "        false\n"
+                "    }\n"
+                "}\n"
+            ),
+            "rust_api_drift_patch": (
+                "pub struct Client {\n"
+                "    pub host: String,\n"
+                "}\n\n"
+                "impl Client {\n"
+                "    pub fn dispatch(&self, endpoint: &str) -> bool {\n"
+                "        let _ = endpoint;\n"
+                "        false\n"
+                "    }\n"
+                "}\n"
+            ),
+        },
     ],
 }
 
@@ -2051,6 +3241,24 @@ TARGETED_MUTATIONS_MAP: Dict[str, Tuple[str, str, str]] = {
     "py_truthiness_service": ("py_truthiness_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
     # d) Revert-mimicking subtle patches (inverts security sanitization hotfix)
     "py_revert_mimic_service": ("py_revert_mimic_patch", "real_revert", "SecuritySurface"),
+    # Go Targeted Subtle Mutations
+    # a) Channel race / goroutine concurrency hazard
+    "go_channel_service": ("go_channel_leak_patch", "concurrency_hazard", "ConcurrencyHazard"),
+    # b) Defer resource cleanup omission / descriptor leak
+    "go_resource_service": ("go_resource_leak_patch", "performance_regression", "PerformanceRegression"),
+    # c) Nil interface / err condition logic drift
+    "go_truthiness_service": ("go_truthiness_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
+    # d) Public struct/interface API breaking alteration
+    "go_api_service": ("go_api_drift_patch", "breaking_public_api", "BreakingPublicAPI"),
+    # Rust Targeted Subtle Mutations
+    # a) Mutex / lock ordering concurrency hazard
+    "rust_concurrency_service": ("rust_concurrency_hazard_patch", "concurrency_hazard", "ConcurrencyHazard"),
+    # b) std::mem::forget / resource leak
+    "rust_resource_service": ("rust_resource_leak_patch", "performance_regression", "PerformanceRegression"),
+    # c) Option / boolean truthiness drift
+    "rust_truthiness_service": ("rust_truthiness_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
+    # d) Public trait method / visibility breaking drift
+    "rust_api_service": ("rust_api_drift_patch", "breaking_public_api", "BreakingPublicAPI"),
 }
 
 
@@ -2291,6 +3499,60 @@ class DatasetGenerator:
                         records.append(r)
         return records
 
+    def generate_targeted_go_mutations(
+        self,
+        count_per_type: int = 1,
+    ) -> List[DatasetRecord]:
+        """
+        Generate targeted subtle mutations for Go covering:
+        a) Channel race / goroutine concurrency hazard (go_channel_service)
+        b) Defer resource cleanup omission / descriptor leak (go_resource_service)
+        c) Nil check / truthiness drift (go_truthiness_service)
+        d) Public method / API signature drift (go_api_service)
+        100% compliant with Stage 1-2 symbolic gate (symbolic_gate_passed=True).
+        """
+        go_templates = [
+            t for t in TEMPLATES.get("go", [])
+            if t["name"] in TARGETED_MUTATIONS_MAP
+        ]
+        records: List[DatasetRecord] = []
+        for i in range(count_per_type):
+            for tmpl in go_templates:
+                pairs = self.generate_pairs_for_template(
+                    tmpl, "go", include_subtle=True, variation_idx=i
+                )
+                for r in pairs:
+                    if r.symbolic_gate_passed:
+                        records.append(r)
+        return records
+
+    def generate_targeted_rust_mutations(
+        self,
+        count_per_type: int = 1,
+    ) -> List[DatasetRecord]:
+        """
+        Generate targeted subtle mutations for Rust covering:
+        a) Mutex / lock ordering concurrency hazard (rust_concurrency_service)
+        b) Memory / resource leak via leaked allocations (rust_resource_service)
+        c) Option / boolean truthiness drift (rust_truthiness_service)
+        d) Public method / API drift (rust_api_service)
+        100% compliant with Stage 1-2 symbolic gate (symbolic_gate_passed=True).
+        """
+        rust_templates = [
+            t for t in TEMPLATES.get("rust", [])
+            if t["name"] in TARGETED_MUTATIONS_MAP
+        ]
+        records: List[DatasetRecord] = []
+        for i in range(count_per_type):
+            for tmpl in rust_templates:
+                pairs = self.generate_pairs_for_template(
+                    tmpl, "rust", include_subtle=True, variation_idx=i
+                )
+                for r in pairs:
+                    if r.symbolic_gate_passed:
+                        records.append(r)
+        return records
+
     def generate_targeted_mutations(
         self,
         languages: Optional[List[str]] = None,
@@ -2303,6 +3565,10 @@ class DatasetGenerator:
             records.extend(self.generate_targeted_typescript_mutations(count_per_type=count_per_type))
         if "python" in target_langs:
             records.extend(self.generate_targeted_python_mutations(count_per_type=count_per_type))
+        if "go" in target_langs:
+            records.extend(self.generate_targeted_go_mutations(count_per_type=count_per_type))
+        if "rust" in target_langs:
+            records.extend(self.generate_targeted_rust_mutations(count_per_type=count_per_type))
         return records
 
     def expand_dataset(
@@ -2311,27 +3577,39 @@ class DatasetGenerator:
         val_records: List[DatasetRecord],
         num_ts_samples: int = 400,
         num_py_samples: int = 400,
+        num_go_samples: int = 0,
+        num_rust_samples: int = 0,
         val_ratio: float = 0.2,
     ) -> Tuple[List[DatasetRecord], List[DatasetRecord]]:
         """
-        Expand training and validation datasets with targeted TypeScript and Python subtle mutations.
+        Expand training and validation datasets with targeted subtle mutations across Tier 1 languages.
         Maintains exact 50% PASS / 50% REJECT class balance across both splits and per language,
         and guarantees 100% symbolic gate compliance (symbolic_gate_passed=True).
         """
         ts_templates = [t for t in TEMPLATES.get("typescript", []) if t["name"] in TARGETED_MUTATIONS_MAP]
         py_templates = [t for t in TEMPLATES.get("python", []) if t["name"] in TARGETED_MUTATIONS_MAP]
+        go_templates = [t for t in TEMPLATES.get("go", []) if t["name"] in TARGETED_MUTATIONS_MAP]
+        rust_templates = [t for t in TEMPLATES.get("rust", []) if t["name"] in TARGETED_MUTATIONS_MAP]
 
-        ts_count_per_type = max(1, (num_ts_samples // 2) // max(1, len(ts_templates)))
-        py_count_per_type = max(1, (num_py_samples // 2) // max(1, len(py_templates)))
-
-        ts_records = self.generate_targeted_typescript_mutations(count_per_type=ts_count_per_type)
-        py_records = self.generate_targeted_python_mutations(count_per_type=py_count_per_type)
+        batch_list = []
+        if num_ts_samples > 0 and ts_templates:
+            ts_count = max(1, (num_ts_samples // 2) // len(ts_templates))
+            batch_list.append(self.generate_targeted_typescript_mutations(count_per_type=ts_count))
+        if num_py_samples > 0 and py_templates:
+            py_count = max(1, (num_py_samples // 2) // len(py_templates))
+            batch_list.append(self.generate_targeted_python_mutations(count_per_type=py_count))
+        if num_go_samples > 0 and go_templates:
+            go_count = max(1, (num_go_samples // 2) // len(go_templates))
+            batch_list.append(self.generate_targeted_go_mutations(count_per_type=go_count))
+        if num_rust_samples > 0 and rust_templates:
+            rust_count = max(1, (num_rust_samples // 2) // len(rust_templates))
+            batch_list.append(self.generate_targeted_rust_mutations(count_per_type=rust_count))
 
         new_train: List[DatasetRecord] = []
         new_val: List[DatasetRecord] = []
 
-        # Stratified balance per language ensures Python samples are never crowded out by TypeScript
-        for lang_recs in (ts_records, py_records):
+        # Stratified balance per language ensures no language is crowded out
+        for lang_recs in batch_list:
             valid = [r for r in lang_recs if r.symbolic_gate_passed]
             pos = [r for r in valid if r.label == self.positive_label]
             neg = [r for r in valid if r.label == self.negative_label]

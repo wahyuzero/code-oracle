@@ -175,6 +175,7 @@ def find_cached_repository(repo_name: str, cache_dir: Optional[Path] = None) -> 
         [
             REPO_ROOT / "benchmarks_repos" / repo_name,
             REPO_ROOT / ".cache" / "repos" / repo_name,
+            Path("/tmp/code_oracle_mined_repos") / repo_name,
             Path("/tmp/code_oracle_repos") / repo_name,
         ]
     )
