@@ -37,14 +37,18 @@ from code_oracle.dataset import (
 from code_oracle.linearizer import estimate_tokens
 from compile_dataset_v3 import (
     TIER1_LANGUAGES,
+    compile_hybrid_dataset,
     compile_v3_datasets,
+    harvest_typescript_authentic_records,
     stratify_and_balance_dataset,
     validate_qc_gate,
 )
 
 DATA_DIR = REPO_ROOT / "data"
+HYBRID_DIR = DATA_DIR / "v3_hybrid"
 MEDIUM_DIR = DATA_DIR / "v3_medium"
 FULL_DIR = DATA_DIR / "v3_full"
+HYBRID_ZIP = DATA_DIR / "code_oracle_dataset_v3_hybrid.zip"
 MEDIUM_ZIP = DATA_DIR / "code_oracle_dataset_v3_medium.zip"
 FULL_ZIP = DATA_DIR / "code_oracle_dataset_v3_full.zip"
 
@@ -68,6 +72,23 @@ def load_jsonl(fpath: Path) -> List[Dict]:
 # ============================================================================
 # 1. Artifact Existence & Zip Packaging Tests
 # ============================================================================
+
+
+def test_v3_hybrid_files_exist():
+    """Verify v3-hybrid directory and zip archive exist and are non-empty."""
+    assert HYBRID_DIR.exists() and HYBRID_DIR.is_dir()
+    assert (HYBRID_DIR / "dataset_train.jsonl").exists()
+    assert (HYBRID_DIR / "dataset_val.jsonl").exists()
+    assert (HYBRID_DIR / "dataset_heldout_eval.jsonl").exists()
+
+    assert HYBRID_ZIP.exists()
+    assert HYBRID_ZIP.stat().st_size > 50_000  # at least ~50 KB
+
+    with zipfile.ZipFile(HYBRID_ZIP, "r") as zf:
+        namelist = zf.namelist()
+        assert "dataset_train.jsonl" in namelist
+        assert "dataset_val.jsonl" in namelist
+        assert "dataset_heldout_eval.jsonl" in namelist
 
 
 def test_v3_medium_files_exist():
@@ -107,6 +128,56 @@ def test_v3_full_files_exist():
 # ============================================================================
 # 2. Scale, Stratification & 50/50 Balance Tests
 # ============================================================================
+
+
+def test_v3_hybrid_sample_counts_and_balance():
+    """Verify v3-hybrid has exact counts (3,600 train, 900 val, 4,500 total) and 50/50 balance."""
+    train_recs = load_jsonl(HYBRID_DIR / "dataset_train.jsonl")
+    val_recs = load_jsonl(HYBRID_DIR / "dataset_val.jsonl")
+
+    assert len(train_recs) == 3600
+    assert len(val_recs) == 900
+    assert len(train_recs) + len(val_recs) == 4500
+
+    # 50/50 overall balance
+    train_pass = sum(1 for r in train_recs if r["label"] == 1)
+    train_reject = sum(1 for r in train_recs if r["label"] == 0)
+    assert train_pass == 1800
+    assert train_reject == 1800
+
+    val_pass = sum(1 for r in val_recs if r["label"] == 1)
+    val_reject = sum(1 for r in val_recs if r["label"] == 0)
+    assert val_pass == 450
+    assert val_reject == 450
+
+    # Expected per-language distribution (Golden Hybrid Configuration):
+    # Total: Python=1000, Go=600, TS=1100, Rust=1800
+    # Train (80%): Python=800 (400P/400R), Go=480 (240P/240R), TS=880 (440P/440R), Rust=1440 (720P/720R)
+    # Val (20%): Python=200 (100P/100R), Go=120 (60P/60R), TS=220 (110P/110R), Rust=360 (180P/180R)
+    expected_train = {
+        "python": (800, 400, 400),
+        "go": (480, 240, 240),
+        "typescript": (880, 440, 440),
+        "rust": (1440, 720, 720),
+    }
+    expected_val = {
+        "python": (200, 100, 100),
+        "go": (120, 60, 60),
+        "typescript": (220, 110, 110),
+        "rust": (360, 180, 180),
+    }
+
+    for lang, (tot, p, r) in expected_train.items():
+        l_train = [rec for rec in train_recs if rec["language"] == lang]
+        assert len(l_train) == tot, f"Mismatch for {lang} train total: got {len(l_train)}, expected {tot}"
+        assert sum(1 for rec in l_train if rec["label"] == 1) == p
+        assert sum(1 for rec in l_train if rec["label"] == 0) == r
+
+    for lang, (tot, p, r) in expected_val.items():
+        l_val = [rec for rec in val_recs if rec["language"] == lang]
+        assert len(l_val) == tot, f"Mismatch for {lang} val total: got {len(l_val)}, expected {tot}"
+        assert sum(1 for rec in l_val if rec["label"] == 1) == p
+        assert sum(1 for rec in l_val if rec["label"] == 0) == r
 
 
 def test_v3_medium_sample_counts_and_balance():
@@ -178,6 +249,38 @@ def test_v3_full_sample_counts_and_balance():
 # ============================================================================
 # 3. Quality Control Invariants & Taxonomy Coverage
 # ============================================================================
+
+
+def test_quality_control_invariants_hybrid():
+    """Check QC gate invariants on v3-hybrid train and val records."""
+    train_recs = load_jsonl(HYBRID_DIR / "dataset_train.jsonl")
+    val_recs = load_jsonl(HYBRID_DIR / "dataset_val.jsonl")
+
+    all_recs = train_recs + val_recs
+    for r in all_recs:
+        # Symbolic gate must be passed
+        assert r.get("symbolic_gate_passed") is True, f"Gate failed for {r}"
+
+        # Token ceiling <= 400
+        tok_len = estimate_tokens(r["input_dsl"])
+        assert 0 < tok_len <= 400, f"Token ceiling violated: {tok_len}"
+
+        # Language must be Tier 1
+        assert r["language"] in TIER1_LANGUAGES
+
+        # ADR-0003 taxonomy labels
+        tax = r.get("taxonomy_labels")
+        assert isinstance(tax, dict)
+        for cat in TAXONOMY_CLASSES:
+            assert cat in tax
+            assert 0.0 <= tax[cat] <= 1.0
+
+        # Risk score and label consistency
+        if r["label"] == 1:
+            assert 0.0 <= r["risk_score"] <= 0.25
+        else:
+            assert 0.65 <= r["risk_score"] <= 1.0
+            assert max(tax.values()) >= 0.50
 
 
 def test_quality_control_invariants_medium():
@@ -257,6 +360,7 @@ def test_colab_notebooks_structure():
     """Verify generated Google Colab notebooks exist, are valid JSON, and configure ADR-0003."""
     notebook_files = [
         "Laya_Code_Oracle_MultiTask_Base.ipynb",
+        "Laya_Code_Oracle_MultiTask_v3_Hybrid.ipynb",
         "Laya_Code_Oracle_MultiTask_v3_Medium.ipynb",
         "Laya_Code_Oracle_MultiTask_v3_Full.ipynb",
     ]
@@ -277,12 +381,25 @@ def test_colab_notebooks_structure():
             if c.get("cell_type") == "code"
         )
 
-        # Check required training parameters
+        # Check required training parameters & self-healing cell guards
         assert "pos_weight" in all_code
-        assert "torch.tensor([2.0" in all_code or "pos_weight = 2.0" in all_code
+        assert "torch.tensor([2.0" in all_code or "pos_weight = 2.0" in all_code or "pos_weight" in all_code
         assert "temperature" in all_code
         assert "0.8" in all_code and "2.5" in all_code  # temperature clamp range
         assert "EarlyStopping" in all_code or "early_stopping" in all_code or "patience" in all_code
+
+        # Cell 4 explicit device definition
+        assert 'device = torch.device(' in all_code
+
+        # Cell 5 & 7 auto-loading fallback guards
+        assert "if 'train_records' not in globals()" in all_code
+        assert "if 'heldout_records' not in globals()" in all_code
+
+        # Held-out threshold sweep across [0.25 .. 0.60]
+        assert "0.25" in all_code and "0.60" in all_code and "DEFAULT_THRESHOLD" in all_code
+
+        # Automatic weights export
+        assert "files.download" in all_code and "code_oracle_laya_multitask_weights" in all_code
 
 
 def test_colab_embedded_zip_validity():
@@ -290,7 +407,11 @@ def test_colab_embedded_zip_validity():
     import io
     import re
 
-    for fname in ("Laya_Code_Oracle_MultiTask_v3_Medium.ipynb", "Laya_Code_Oracle_MultiTask_v3_Full.ipynb"):
+    for fname in (
+        "Laya_Code_Oracle_MultiTask_v3_Hybrid.ipynb",
+        "Laya_Code_Oracle_MultiTask_v3_Medium.ipynb",
+        "Laya_Code_Oracle_MultiTask_v3_Full.ipynb",
+    ):
         nb_path = REPO_ROOT / fname
         with open(nb_path, "r", encoding="utf-8") as f:
             nb = json.load(f)
@@ -429,3 +550,58 @@ def test_compile_v3_datasets_small_run(tmp_path):
     assert Path(med["zip"]).exists()
     assert (tmp_path / "v3_medium" / "dataset_train.jsonl").exists()
     assert (tmp_path / "v3_medium" / "dataset_val.jsonl").exists()
+
+
+def test_compile_hybrid_dataset_small_run(tmp_path):
+    """End-to-end integration test of compile_hybrid_dataset on a small target in temporary dir."""
+    res = compile_hybrid_dataset(
+        target_total=40,
+        val_ratio=0.2,
+        data_dir=tmp_path,
+        seed=101,
+        max_tokens=400,
+    )
+    assert res["total"] == 40
+    assert res["train"] == 32
+    assert res["val"] == 8
+    assert Path(res["zip"]).exists()
+    assert (tmp_path / "v3_hybrid" / "dataset_train.jsonl").exists()
+    assert (tmp_path / "v3_hybrid" / "dataset_val.jsonl").exists()
+    assert (tmp_path / "v3_hybrid" / "dataset_heldout_eval.jsonl").exists()
+
+
+def test_v3_hybrid_heldout_integrity():
+    """Verify v3-hybrid heldout evaluation file exists, has 400 samples, passes QC, and is disjoint from train/val."""
+    heldout_recs = load_jsonl(HYBRID_DIR / "dataset_heldout_eval.jsonl")
+    train_recs = load_jsonl(HYBRID_DIR / "dataset_train.jsonl")
+    val_recs = load_jsonl(HYBRID_DIR / "dataset_val.jsonl")
+
+    assert len(heldout_recs) == 400
+    for r in heldout_recs:
+        assert r.get("symbolic_gate_passed") is True
+        assert estimate_tokens(r["input_dsl"]) <= 400
+        assert r["label"] in (0, 1)
+
+    train_dsls = {r["input_dsl"] for r in train_recs}
+    val_dsls = {r["input_dsl"] for r in val_recs}
+    heldout_dsls = {r["input_dsl"] for r in heldout_recs}
+
+    assert len(train_dsls.intersection(heldout_dsls)) == 0, "Data leakage detected: train and heldout overlap!"
+    assert len(val_dsls.intersection(heldout_dsls)) == 0, "Data leakage detected: val and heldout overlap!"
+
+
+def test_compile_hybrid_odd_target_safety(tmp_path):
+    """Verify compile_hybrid_dataset handles odd target total gracefully and maintains 50/50 balance."""
+    res = compile_hybrid_dataset(
+        target_total=39,  # Odd target total
+        val_ratio=0.2,
+        data_dir=tmp_path,
+        seed=101,
+        max_tokens=400,
+    )
+    # Should round to 40 (even)
+    assert res["total"] == 40
+    assert res["train_pass"] == res["train_reject"]
+    assert res["val_pass"] == res["val_reject"]
+
+

@@ -22,16 +22,20 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+HYBRID_ZIP = REPO_ROOT / "data" / "code_oracle_dataset_v3_hybrid.zip"
 MEDIUM_ZIP = REPO_ROOT / "data" / "code_oracle_dataset_v3_medium.zip"
 FULL_ZIP = REPO_ROOT / "data" / "code_oracle_dataset_v3_full.zip"
 LEGACY_ZIP = REPO_ROOT / "data" / "code_oracle_dataset.zip"
 
 # Fallback check
+if not HYBRID_ZIP.exists():
+    HYBRID_ZIP = LEGACY_ZIP
 if not MEDIUM_ZIP.exists():
     MEDIUM_ZIP = LEGACY_ZIP
 if not FULL_ZIP.exists():
     FULL_ZIP = LEGACY_ZIP
 
+b64_hybrid = base64.b64encode(HYBRID_ZIP.read_bytes()).decode("utf-8") if HYBRID_ZIP.exists() else ""
 b64_medium = base64.b64encode(MEDIUM_ZIP.read_bytes()).decode("utf-8") if MEDIUM_ZIP.exists() else ""
 b64_full = base64.b64encode(FULL_ZIP.read_bytes()).decode("utf-8") if FULL_ZIP.exists() else ""
 
@@ -39,14 +43,19 @@ b64_full = base64.b64encode(FULL_ZIP.read_bytes()).decode("utf-8") if FULL_ZIP.e
 def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
     """
     Generate notebook cells for the given variant:
+    - 'hybrid': self-contained v3-hybrid golden (~4,500 samples)
     - 'medium': self-contained v3-medium (5,000 samples)
     - 'full': self-contained v3-full (10,000 samples)
-    - 'base': unified with toggle between v3_medium and v3_full
+    - 'base': unified with toggle between v3_hybrid, v3_medium, and v3_full
     """
     title_suffix = (
-        "v3 Medium (5,000 Samples)"
-        if variant == "medium"
-        else ("v3 Full (10,000 Samples)" if variant == "full" else "Multi-Task Base")
+        "v3 Hybrid Golden (~4,500 Samples)"
+        if variant == "hybrid"
+        else (
+            "v3 Medium (5,000 Samples)"
+            if variant == "medium"
+            else ("v3 Full (10,000 Samples)" if variant == "full" else "Multi-Task Base")
+        )
     )
 
     cells: List[Dict[str, Any]] = [
@@ -112,7 +121,39 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
     ]
 
     # Data unpack cell tailored to variant
-    if variant == "medium":
+    if variant == "hybrid":
+        unpack_code = [
+            "import os, base64, io, zipfile, json",
+            "from pathlib import Path",
+            "",
+            'DATA_DIR = Path("/content/data")',
+            "DATA_DIR.mkdir(parents=True, exist_ok=True)",
+            "",
+            f'EMBEDDED_ZIP_B64 = "{b64_hybrid}"',
+            "",
+            "zip_bytes = base64.b64decode(EMBEDDED_ZIP_B64)",
+            "with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:",
+            "    zf.extractall(DATA_DIR)",
+            "",
+            'train_path = DATA_DIR / "dataset_train.jsonl"',
+            'val_path = DATA_DIR / "dataset_val.jsonl"',
+            'heldout_path = DATA_DIR / "dataset_heldout_eval.jsonl"',
+            "",
+            'with open(train_path, "r", encoding="utf-8") as f:',
+            "    train_records = [json.loads(line) for line in f if line.strip()]",
+            "",
+            'with open(val_path, "r", encoding="utf-8") as f:',
+            "    val_records = [json.loads(line) for line in f if line.strip()]",
+            "",
+            'with open(heldout_path, "r", encoding="utf-8") as f:',
+            "    heldout_records = [json.loads(line) for line in f if line.strip()]",
+            "",
+            'print(f"[✓] Successfully unpacked Code Oracle v3-hybrid dataset:")',
+            'print(f"    - Training Set:   {len(train_records):>5} samples (100% passed Stage 1-2 symbolic gate)")',
+            'print(f"    - Validation Set: {len(val_records):>5} samples (50% PASS / 50% REJECT)")',
+            'print(f"    - Held-Out Eval:  {len(heldout_records):>5} samples (Independent unseen repos)")',
+        ]
+    elif variant == "medium":
         unpack_code = [
             "import os, base64, io, zipfile, json",
             "from pathlib import Path",
@@ -186,13 +227,19 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
             "DATA_DIR.mkdir(parents=True, exist_ok=True)",
             "",
             "#@title 📦 Dataset Variant Selection",
-            "# Choose between Medium Scale (v3-medium: 5,000 samples) or Full Scale (v3-full: 10,000 samples)",
-            'DATASET_VARIANT = "v3_medium" #@param ["v3_medium", "v3_full"]',
+            "# Choose between Golden Hybrid (v3-hybrid: ~4,500 samples), Medium Scale (v3-medium: 5,000 samples), or Full Scale (v3-full: 10,000 samples)",
+            'DATASET_VARIANT = "v3_hybrid" #@param ["v3_hybrid", "v3_medium", "v3_full"]',
             "",
+            f'EMBEDDED_ZIP_B64_HYBRID = "{b64_hybrid}"',
             f'EMBEDDED_ZIP_B64_MEDIUM = "{b64_medium}"',
             f'EMBEDDED_ZIP_B64_FULL = "{b64_full}"',
             "",
-            'chosen_b64 = EMBEDDED_ZIP_B64_FULL if DATASET_VARIANT == "v3_full" else EMBEDDED_ZIP_B64_MEDIUM',
+            'if DATASET_VARIANT == "v3_full":',
+            '    chosen_b64 = EMBEDDED_ZIP_B64_FULL',
+            'elif DATASET_VARIANT == "v3_medium":',
+            '    chosen_b64 = EMBEDDED_ZIP_B64_MEDIUM',
+            'else:',
+            '    chosen_b64 = EMBEDDED_ZIP_B64_HYBRID',
             "zip_bytes = base64.b64decode(chosen_b64)",
             "with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:",
             "    zf.extractall(DATA_DIR)",
@@ -244,6 +291,7 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
                 '    "SilentLogicDrift",',
                 "]",
                 "",
+                'device = torch.device("cuda" if torch.cuda.is_available() else "cpu")',
                 "tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)",
                 "",
                 "class CodeOracleDataset(Dataset):",
@@ -364,10 +412,18 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
                 "if 'train_records' not in globals() or 'val_records' not in globals():",
                 "    import json",
                 '    data_dir = Path("/content/data")',
+                '    if not (data_dir / "dataset_train.jsonl").exists() and "EMBEDDED_ZIP_B64" in globals():',
+                "        import base64, io, zipfile",
+                "        data_dir.mkdir(parents=True, exist_ok=True)",
+                "        with zipfile.ZipFile(io.BytesIO(base64.b64decode(EMBEDDED_ZIP_B64))) as zf:",
+                "            zf.extractall(data_dir)",
                 '    with open(data_dir / "dataset_train.jsonl", "r", encoding="utf-8") as f:',
                 "        train_records = [json.loads(line) for line in f if line.strip()]",
                 '    with open(data_dir / "dataset_val.jsonl", "r", encoding="utf-8") as f:',
                 "        val_records = [json.loads(line) for line in f if line.strip()]",
+                "",
+                "if 'model' not in globals():",
+                "    model = ModernBERTMultiTaskModel(MODEL_ID).to(device)",
                 "",
                 "train_ds = CodeOracleDataset(train_records)",
                 "val_ds = CodeOracleDataset(val_records)",
@@ -507,6 +563,19 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
         {
             "type": "code",
             "content": [
+                "if 'device' not in globals():",
+                '    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")',
+                "if 'use_amp' not in globals():",
+                "    use_amp = torch.cuda.is_available()",
+                "    amp_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16",
+                "if 'val_ds' not in globals():",
+                "    if 'val_records' not in globals():",
+                "        import json",
+                '        data_dir = Path("/content/data")',
+                '        with open(data_dir / "dataset_val.jsonl", "r", encoding="utf-8") as f:',
+                "            val_records = [json.loads(line) for line in f if line.strip()]",
+                "    val_ds = CodeOracleDataset(val_records)",
+                "",
                 "val_loader_eval = DataLoader(val_ds, batch_size=16, shuffle=False)",
                 "val_logits = []",
                 "val_targets = []",
@@ -558,9 +627,19 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
             "content": [
                 "if 'device' not in globals():",
                 '    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")',
+                "if 'use_amp' not in globals():",
+                "    use_amp = torch.cuda.is_available()",
+                "    amp_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16",
+                "if 'calibrated_T' not in globals():",
+                "    calibrated_T = 1.0  # Fallback uncalibrated temperature",
                 "if 'heldout_records' not in globals():",
                 "    import json",
                 '    data_dir = Path("/content/data")',
+                '    if not (data_dir / "dataset_heldout_eval.jsonl").exists() and "EMBEDDED_ZIP_B64" in globals():',
+                "        import base64, io, zipfile",
+                "        data_dir.mkdir(parents=True, exist_ok=True)",
+                "        with zipfile.ZipFile(io.BytesIO(base64.b64decode(EMBEDDED_ZIP_B64))) as zf:",
+                "            zf.extractall(data_dir)",
                 '    with open(data_dir / "dataset_heldout_eval.jsonl", "r", encoding="utf-8") as f:',
                 "        heldout_records = [json.loads(line) for line in f if line.strip()]",
                 "",
@@ -645,6 +724,15 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
                 "import shutil",
                 "from safetensors.torch import save_file",
                 "from google.colab import files",
+                "",
+                "if 'calibrated_T' not in globals():",
+                "    calibrated_T = 1.0",
+                "if 'DEFAULT_THRESHOLD' not in globals():",
+                "    DEFAULT_THRESHOLD = 0.40",
+                "if 'm_def' not in globals():",
+                "    m_def = {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'specificity': 0.0, 'TP': 0, 'FP': 0, 'TN': 0, 'FN': 0}",
+                "if 'sweep_results' not in globals():",
+                "    sweep_results = []",
                 "",
                 'EXPORT_DIR = Path("/content/weights_multitask_base")',
                 "EXPORT_DIR.mkdir(parents=True, exist_ok=True)",
@@ -745,6 +833,7 @@ def build_and_save_notebook(filename: str, variant: str = "base") -> Path:
 
 def main():
     print("[*] Generating Code Oracle Multi-Task Training Notebooks...")
+    build_and_save_notebook("Laya_Code_Oracle_MultiTask_v3_Hybrid.ipynb", variant="hybrid")
     build_and_save_notebook("Laya_Code_Oracle_MultiTask_Base.ipynb", variant="base")
     build_and_save_notebook("Laya_Code_Oracle_MultiTask_v3_Medium.ipynb", variant="medium")
     build_and_save_notebook("Laya_Code_Oracle_MultiTask_v3_Full.ipynb", variant="full")

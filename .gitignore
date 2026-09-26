@@ -86,7 +86,6 @@ dataset_output/
 # Track Generated Datasets
 !data/
 !data/*.jsonl
-!data/*.zip
 
 # Large Archives & Compression
 *.zip
@@ -95,5 +94,7 @@ dataset_output/
 *.tgz
 *.gz
 *.7z
-!data/code_oracle_dataset.zip
+!data/code_oracle_dataset*.zip
+!data/*.zip
+
 
