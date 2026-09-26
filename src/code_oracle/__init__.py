@@ -7,6 +7,7 @@ from code_oracle.engine import TopoSliceEngine
 from code_oracle.indexer import WorkspaceIndexer
 from code_oracle.linearizer import estimate_tokens, linearize_subgraph
 from code_oracle.locator import extract_symbols_from_ast, locate_affected_symbols
+from code_oracle.perf_lint import lint_performance_patterns
 from code_oracle.server import verify_patch
 from code_oracle.slicer import slice_neighborhood
 from code_oracle.symbolic import find_cycles_tarjan, verify_symbolic_gate
@@ -18,6 +19,7 @@ __all__ = [
     "TopoSliceEngine",
     "verify_patch",
     "detect_dead_code",
+    "lint_performance_patterns",
     "WorkspaceIndexer",
     "find_cycles_tarjan",
     "verify_symbolic_gate",
