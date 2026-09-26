@@ -13,9 +13,16 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    nn = None
+    F = None
+    HAS_TORCH = False
 
 from code_oracle.dead_code.models import DeadSymbol, SemanticClassification, SemanticDeadSymbol
 from code_oracle.models import Symbol
@@ -118,7 +125,10 @@ def vectorize_symbol(symbol: Symbol) -> str:
     )
 
 
-class DeadCodeSemanticsModel(nn.Module):
+_ModuleBase = nn.Module if (HAS_TORCH and nn is not None) else object
+
+
+class DeadCodeSemanticsModel(_ModuleBase):
     """
     Stage 2 Neural Classifier Head over ModernBERT representations.
     Maps pooled representation h_pool in R^hidden_size (default 768) to 3-class distribution:
@@ -133,6 +143,8 @@ class DeadCodeSemanticsModel(nn.Module):
     ]
 
     def __init__(self, hidden_size: int = 768, num_classes: int = 3):
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch is required to instantiate DeadCodeSemanticsModel")
         super().__init__()
         self.hidden_size = hidden_size
         self.num_classes = num_classes
@@ -143,8 +155,10 @@ class DeadCodeSemanticsModel(nn.Module):
             nn.Linear(128, num_classes),
         )
 
-    def forward(self, h_pool: torch.Tensor) -> torch.Tensor:
+    def forward(self, h_pool: Any) -> Any:
         """Forward pass returning softmax probability distribution (B, 3)."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch is required for model forward pass")
         logits = self.classifier(h_pool)
         return F.softmax(logits, dim=-1)
 
@@ -171,6 +185,9 @@ class DeadCodeSemanticsClassifier:
 
     def _try_load_model(self) -> None:
         """Attempt to load ModernBERT or Laya semantic classification weights."""
+        if not HAS_TORCH:
+            self._loaded = False
+            return
         try:
             # Check candidate paths if not explicitly specified
             if not self.weights_path:

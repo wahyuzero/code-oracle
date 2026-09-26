@@ -726,16 +726,9 @@ class LayaDecisionHead:
                         "input_ids": input_ids_np,
                         "attention_mask": attention_mask_np,
                     }
-                    ort_outputs = self.onnx_session.run(None, ort_inputs)
-                    out_map = dict(zip([
-                        "risk_score",
-                        "risk_logits",
-                        "taxonomy_logits",
-                        "taxonomy_probs",
-                        "log_variance",
-                        "variance",
-                        "confidence",
-                    ], ort_outputs))
+                    output_names = [o.name for o in self.onnx_session.get_outputs()]
+                    ort_outputs = self.onnx_session.run(output_names, ort_inputs)
+                    out_map = dict(zip(output_names, ort_outputs))
 
                     raw_risk = float(out_map["risk_score"][0][0])
                     raw_logits = float(out_map["risk_logits"][0][0]) if "risk_logits" in out_map else None

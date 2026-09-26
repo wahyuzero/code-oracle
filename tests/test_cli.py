@@ -239,3 +239,27 @@ def test_cli_perf_lint_formats_and_error_exit(cli_workspace):
     assert "leak.py:1" in res_text.stdout
 
 
+def test_cli_hook_subcommands(cli_workspace):
+    # Verify hook status subcommand
+    res_status = subprocess.run(
+        ["code-oracle", "hook", "status", "-w", str(cli_workspace), "--json"],
+        capture_output=True,
+        text=True,
+    )
+    assert res_status.returncode == 0
+    data_status = json.loads(res_status.stdout)
+    assert "installed" in data_status
+    assert "enabled" in data_status
+
+    # Verify hook run subcommand (with empty files or non-git repo)
+    res_run = subprocess.run(
+        ["code-oracle", "hook", "run", "-w", str(cli_workspace), "--json"],
+        capture_output=True,
+        text=True,
+    )
+    assert res_run.returncode == 0
+    data_run = json.loads(res_run.stdout)
+    assert "status" in data_run
+
+
+

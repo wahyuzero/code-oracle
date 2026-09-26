@@ -280,7 +280,7 @@ def verify_numeric_parity(
             "input_ids": tokens["input_ids"].numpy().astype(np.int64),
             "attention_mask": tokens["attention_mask"].numpy().astype(np.int64),
         }
-        fp32_outs = session_fp32.run(None, ort_inputs)
+        fp32_outs = session_fp32.run(OUTPUT_NAMES, ort_inputs)
         fp32_map = dict(zip(OUTPUT_NAMES, fp32_outs))
 
         fp32_risk = float(fp32_map["risk_score"][0][0])
@@ -304,7 +304,7 @@ def verify_numeric_parity(
 
         # ONNX INT8 inference if available
         if session_int8 is not None:
-            int8_outs = session_int8.run(None, ort_inputs)
+            int8_outs = session_int8.run(OUTPUT_NAMES, ort_inputs)
             int8_map = dict(zip(OUTPUT_NAMES, int8_outs))
 
             int8_risk = float(int8_map["risk_score"][0][0])

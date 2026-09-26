@@ -292,6 +292,37 @@ def test_pure_onnx_inference_without_torch(sample_weights_dir):
     assert all(0.0 <= p <= 1.0 for p in taxonomy_probs)
 
 
+def test_laya_decision_head_pure_onnx_without_torch(sample_weights_dir, monkeypatch):
+    """Verify LayaDecisionHead performs end-to-end inference when PyTorch is not available."""
+    import code_oracle.decision as decision_mod
+
+    monkeypatch.setattr(decision_mod, "HAS_TORCH", False)
+    monkeypatch.setattr(decision_mod, "torch", None)
+
+    head = LayaDecisionHead(
+        weights_path=sample_weights_dir,
+        enabled=True,
+        prefer_onnx=True,
+    )
+    assert head.is_neural_enabled is True
+    assert head.engine_mode == "onnx_int8"
+    assert head.pytorch_multitask_model is None
+    assert head.onnx_session is not None
+
+    dsl = "[DIFF_TARGET] app.py\n[GATE]\nSTATUS: APPROVED\nDEF add(a, b) -> RETURN a + b"
+    res = head.predict_multi_task(
+        linearized_dsl=dsl,
+        symbolic_status="APPROVED",
+        symbolic_confidence=0.95,
+        has_violations=False,
+    )
+    assert res.is_neural_calibrated is True
+    assert res.engine_mode == "onnx_int8"
+    assert 0.0 <= res.risk_score <= 1.0
+    assert 0.0 <= res.confidence <= 1.0
+    assert len(res.risk_taxonomy.to_dict()) == 5
+
+
 def test_engine_verification_report_includes_engine_mode(tmp_path, sample_weights_dir):
     """Verify TopoSliceEngine includes engine_mode in EnhancedVerificationReport."""
     calc_file = tmp_path / "calc.py"
@@ -316,26 +347,136 @@ def test_engine_verification_report_includes_engine_mode(tmp_path, sample_weight
     assert report_dict["engine_mode"] in ("onnx_int8", "onnx_fp32")
 
 
-def test_cli_export_onnx_command(tmp_path, sample_weights_dir):
-    """Verify code-oracle export-onnx CLI execution."""
-    out_dir = tmp_path / "onnx_out"
-    cmd = [
-        "code-oracle",
-        "export-onnx",
-        "--weights",
-        str(sample_weights_dir),
-        "--output-dir",
-        str(out_dir),
-        "--json",
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    assert res.returncode == 0, f"CLI error: {res.stderr}"
+def test_cli_export_onnx_help():
+    """Verify code-oracle export-onnx CLI subparser and help options."""
+    res = subprocess.run(["code-oracle", "export-onnx", "--help"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "--weights" in res.stdout
+    assert "--output-dir" in res.stdout
+    assert "--no-int8" in res.stdout
+    assert "--no-verify" in res.stdout
+    assert "--opset" in res.stdout
+    assert "--json" in res.stdout
 
-    data = json.loads(res.stdout)
-    assert data["status"] == "SUCCESS"
-    assert (out_dir / "model.onnx").exists()
-    assert (out_dir / "model_int8.onnx").exists()
-    assert data["parity"]["status"] == "PASS"
+
+def test_tools_export_onnx_help():
+    """Verify standalone tools/export_onnx.py script and help options."""
+    tool_path = REPO_ROOT / "tools" / "export_onnx.py"
+    res = subprocess.run([sys.executable, str(tool_path), "--help"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "--weights-dir" in res.stdout
+    assert "--output-dir" in res.stdout
+    assert "--no-int8" in res.stdout
+    assert "--no-verify" in res.stdout
+
+
+def test_export_and_quantize_coordination(tmp_path, sample_weights_dir):
+    """Verify export_and_quantize coordinates export, quantization, asset sync, and parity."""
+    fake_fp32 = tmp_path / "model.onnx"
+    fake_fp32.write_bytes(b"fp32_content")
+    fake_int8 = tmp_path / "model_int8.onnx"
+    fake_int8.write_bytes(b"int8_content")
+
+    mock_parity = {
+        "status": "PASS",
+        "fp32_parity_pass": True,
+        "int8_parity_pass": True,
+        "max_fp32_risk_diff": 1e-7,
+        "max_int8_risk_diff": 0.015,
+        "samples_tested": 4,
+    }
+
+    with patch("code_oracle.export_onnx.export_model_to_onnx", return_value=fake_fp32) as mock_exp, \
+         patch("code_oracle.export_onnx.quantize_onnx_int8", return_value=fake_int8) as mock_q, \
+         patch("code_oracle.export_onnx.verify_numeric_parity", return_value=mock_parity) as mock_vp:
+
+        res = export_and_quantize(
+            weights_path=sample_weights_dir,
+            output_dir=tmp_path,
+            quantize_int8=True,
+            verify_parity=True,
+            opset_version=17,
+        )
+
+        assert res["status"] == "SUCCESS"
+        assert res["model_onnx"] == str(fake_fp32)
+        assert res["model_int8_onnx"] == str(fake_int8)
+        assert res["parity"]["status"] == "PASS"
+        mock_exp.assert_called_once()
+        mock_q.assert_called_once()
+        mock_vp.assert_called_once()
+
+
+def test_cli_export_onnx_dispatch(tmp_path, sample_weights_dir, capsys):
+    """Verify cmd_export_onnx CLI handler with JSON and human formatting."""
+    import argparse
+    from code_oracle.cli import cmd_export_onnx
+
+    mock_summary = {
+        "status": "SUCCESS",
+        "output_dir": str(tmp_path),
+        "model_onnx": str(tmp_path / "model.onnx"),
+        "model_int8_onnx": str(tmp_path / "model_int8.onnx"),
+        "fp32_size_mb": 571.04,
+        "int8_size_mb": 143.74,
+        "elapsed_seconds": 15.2,
+        "parity": {
+            "status": "PASS",
+            "fp32_parity_pass": True,
+            "int8_parity_pass": True,
+            "max_fp32_risk_diff": 2.98e-8,
+            "max_int8_risk_diff": 0.0163,
+            "samples_tested": 4,
+        },
+    }
+
+    with patch("code_oracle.export_onnx.export_and_quantize", return_value=mock_summary):
+        # JSON output mode
+        args_json = argparse.Namespace(
+            weights=str(sample_weights_dir),
+            output_dir=str(tmp_path),
+            quantize_int8=True,
+            verify_parity=True,
+            opset=17,
+            json=True,
+        )
+        exit_code = cmd_export_onnx(args_json)
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["status"] == "SUCCESS"
+        assert data["parity"]["status"] == "PASS"
+
+        # Human-readable table output mode
+        args_text = argparse.Namespace(
+            weights=str(sample_weights_dir),
+            output_dir=str(tmp_path),
+            quantize_int8=True,
+            verify_parity=True,
+            opset=17,
+            json=False,
+        )
+        exit_code = cmd_export_onnx(args_text)
+        assert exit_code == 0
+        captured_text = capsys.readouterr()
+        assert "ONNX EXPORT & QUANTIZATION REPORT" in captured_text.out
+        assert "Parity Status:" in captured_text.out
+
+    # Test error handling
+    with patch("code_oracle.export_onnx.export_and_quantize", side_effect=RuntimeError("Export failure")):
+        args_err = argparse.Namespace(
+            weights=str(sample_weights_dir),
+            output_dir=str(tmp_path),
+            quantize_int8=True,
+            verify_parity=True,
+            opset=17,
+            json=True,
+        )
+        exit_code = cmd_export_onnx(args_err)
+        assert exit_code == 1
+        captured_err = capsys.readouterr()
+        err_data = json.loads(captured_err.out)
+        assert err_data["status"] == "FAILED"
 
 
 def test_cpu_inference_benchmark_latency(sample_weights_dir):

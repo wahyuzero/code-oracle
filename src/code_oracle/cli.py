@@ -729,6 +729,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_h_run.add_argument("--workspace", "-w", help="Workspace root directory")
     p_h_run.add_argument("--mode", choices=["block", "warn"], default=None, help="Override mode (block or warn)")
     p_h_run.add_argument("--k", type=int, default=1, help="k-hop neighborhood radius (default: 1)")
+    p_h_run.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_h_run.set_defaults(func=cmd_hook_run)
+
     # export-onnx
     p_export = subparsers.add_parser(
         "export-onnx",
