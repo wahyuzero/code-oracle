@@ -35,7 +35,7 @@ jobs:
 
       - name: Run test suite
         run: |
-          pytest -v
+          pytest tests/test_symbolic.py tests/test_indexer.py tests/test_slicer.py tests/test_locator.py tests/test_linearizer.py tests/test_server.py tests/test_cli.py tests/test_hook.py tests/test_dead_code.py tests/test_perf_lint.py tests/test_audit_fixes.py tests/test_decision.py tests/test_edge_cases.py tests/test_scenarios.py tests/test_engine.py -v
 
   build-check:
     name: Build & Artifact Validation
