@@ -7,6 +7,8 @@
 [![Inference Latency](https://img.shields.io/badge/Verification-<50ms_local-brightgreen.svg)](#key-characteristics)
 [![Token Waste](https://img.shields.io/badge/Output_Tokens-0_tokens-success.svg)](#key-characteristics)
 [![Paradigm](https://img.shields.io/badge/Architecture-Neuro--Symbolic-orange.svg)](#architecture)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/code-oracle/)
+[![GitHub Release](https://img.shields.io/badge/release-v0.1.0-brightgreen.svg)](https://github.com/wahyuzero/code-oracle/releases/tag/v0.1.0)
 
 ---
 
@@ -96,6 +98,50 @@ Code Oracle automatically downloads and caches these weights to `~/.cache/code_o
 
 ---
 
+## Installation & Quickstart
+
+### 1. Install via pip
+
+```bash
+# Core AST Symbolic Verification Engine (< 8ms, zero neural footprint)
+pip install code-oracle
+
+# With Tyranid-BERT ONNX Runtime decision model (< 20ms INT8 CPU)
+pip install "code-oracle[neural]"
+
+# Full developer setup with test suites & packaging tools
+pip install "code-oracle[all]"
+```
+
+### 2. FastMCP Server for Coding Agents
+
+Run Code Oracle as an MCP sidecar for Claude Code, Cursor, or Antigravity:
+
+```bash
+code-oracle serve
+```
+
+### 3. CLI Verification & Analysis
+
+```bash
+# Verify proposed patch against current repository state
+code-oracle verify --patch /path/to/patch.diff
+
+# Incremental workspace symbol indexing
+code-oracle index .
+
+# Dead code & orphan symbol scan (0 in-degree reachability)
+code-oracle dead-code .
+
+# Static performance anti-pattern & resource leak audit
+code-oracle perf-lint .
+
+# Install Git pre-commit verification hook
+code-oracle hook install
+```
+
+---
+
 ## Roadmap
 
 - [x] Architecture Specification & Subgraph Slicing Design
@@ -112,8 +158,8 @@ Code Oracle automatically downloads and caches these weights to `~/.cache/code_o
 - [x] Multi-language AST extractors for Tier 1 languages (Python, TypeScript, Go, Rust)
 - [x] Dead Code & Orphan Symbol Scanner (`code-oracle dead-code` via 0-in-degree graph reachability)
 - [x] Static Performance Anti-Patterns & Resource Leak Detector (`code-oracle perf-lint`: nested loop complexity, unclosed handles)
-- [ ] Official Git Tagging & GitHub Release pipeline (`v0.1.0`)
-- [ ] Python Package Wheel Distribution & PyPI Publishing (`pip install code-oracle`)
+- [x] Official Git Tagging & GitHub Release pipeline (`v0.1.0`)
+- [x] Python Package Wheel Distribution & PyPI Publishing (`pip install code-oracle`)
 - [ ] Multi-Agent Ecosystem Integrations (Claude Code, Cursor, Antigravity, OpenCode, and Cline sidecars)
 
 ---

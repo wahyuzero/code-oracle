@@ -21,20 +21,67 @@ keywords = [
     "verification",
     "laya",
     "decision-model",
-    "frugal-computing"
+    "frugal-computing",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
     "mcp>=1.0.0",
     "tree-sitter>=0.22.0",
+    "tree-sitter-go>=0.21.0",
+    "tree-sitter-javascript>=0.21.0",
+    "tree-sitter-python>=0.21.0",
+    "tree-sitter-rust>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",
 ]
 
 [project.optional-dependencies]
+neural = [
+    "onnxruntime>=1.17.0",
+    "numpy>=1.24.0",
+    "huggingface-hub>=0.20.0",
+    "tokenizers>=0.15.0",
+]
 dev = [
     "pytest>=8.0.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
 ]
+all = [
+    "code-oracle[neural,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/wahyuzero/code-oracle"
+Repository = "https://github.com/wahyuzero/code-oracle.git"
+Issues = "https://github.com/wahyuzero/code-oracle/issues"
+Documentation = "https://github.com/wahyuzero/code-oracle#readme"
+"Hugging Face" = "https://huggingface.co/wxsys/tyranid-bert"
 
 [project.scripts]
 code-oracle = "code_oracle.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_oracle"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/benchmarks_repos",
+    "/weights_base",
+    "/.pytest_cache",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

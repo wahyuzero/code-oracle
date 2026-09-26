@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e ".[dev]"
+
+      - name: Run test suite
+        run: |
+          pytest tests/test_symbolic.py tests/test_indexer.py tests/test_slicer.py tests/test_locator.py tests/test_linearizer.py tests/test_server.py tests/test_cli.py tests/test_hook.py tests/test_dead_code.py tests/test_perf_lint.py tests/test_audit_fixes.py tests/test_decision.py tests/test_edge_cases.py tests/test_scenarios.py -v
+
+  build-check:
+    name: Build & Artifact Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv & twine
+        run: |
+          pip install uv twine
+
+      - name: Build sdist and wheel
+        run: |
+          uv build
+
+      - name: Verify package metadata with twine
+        run: |
+          twine check dist/*
+
+      - name: Test wheel installation in clean environment
+        run: |
+          python -m venv /tmp/clean_venv
+          /tmp/clean_venv/bin/pip install dist/*.whl
+          /tmp/clean_venv/bin/code-oracle --version
+          /tmp/clean_venv/bin/code-oracle --help
