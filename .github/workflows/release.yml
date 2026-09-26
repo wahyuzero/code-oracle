@@ -5,6 +5,12 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag (e.g. v0.1.0). Leave empty to skip GitHub release."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -44,6 +50,7 @@ jobs:
   github-release:
     name: Create GitHub Release
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -60,6 +67,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
           files: dist/*
           generate_release_notes: true
           draft: false
@@ -67,7 +75,7 @@ jobs:
 
   pypi-publish:
     name: Publish to PyPI
-    needs: [build, github-release]
+    needs: [build]
     runs-on: ubuntu-latest
     environment:
       name: pypi
