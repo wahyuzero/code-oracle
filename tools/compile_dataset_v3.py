@@ -551,18 +551,18 @@ def package_dataset_variant(
 
 
 def compile_hybrid_dataset(
-    target_total: int = 4500,
+    target_total: int = 4900,
     val_ratio: float = 0.2,
     data_dir: Optional[Path] = None,
     seed: int = 42,
     max_tokens: int = 400,
 ) -> Dict[str, Any]:
     """
-    Compile the Golden Hybrid Dataset (~4,000 to 4,500 samples, default 4,500):
+    Compile the Golden Hybrid Dataset (4,900 samples, default 4,900):
     1. Python: High-density targeted mutation samples from 3.2k dataset (data/dataset_train.jsonl and data/dataset_val.jsonl).
        1,000 samples (500 PASS / 500 REJECT).
-    2. Go: Balanced samples from 3.2k dataset (data/).
-       600 samples (300 PASS / 300 REJECT).
+    2. Go: Balanced samples enriched with 5 idiomatic Go semantic mutations.
+       1,000 samples (500 PASS / 500 REJECT).
     3. Rust: Comprehensive multi-class samples from 10k dataset (data/v3_full/).
        1,800 samples (900 PASS / 900 REJECT).
     4. TypeScript: Base samples from 3.2k dataset (1,000 samples) enriched with authentic
@@ -570,7 +570,7 @@ def compile_hybrid_dataset(
        1,100 samples (550 PASS / 550 REJECT).
 
     Exact Quality Gates:
-    - 50% PASS / 50% REJECT ratio across all splits (3,600 train, 900 val) and per language.
+    - 50% PASS / 50% REJECT ratio across all splits (3,920 train, 980 val) and per language.
     - 100% symbolic_gate_passed == True.
     - estimate_tokens <= 400.
     - Full ADR-0003 multi-task risk taxonomy.
@@ -590,7 +590,14 @@ def compile_hybrid_dataset(
         target_total += 1
 
     # Compute target language allocations in Golden Hybrid Configuration
-    if target_total == 4500:
+    if target_total == 4900:
+        targets_per_language = {
+            "python": 1000,
+            "go": 1000,
+            "typescript": 1100,
+            "rust": 1800,
+        }
+    elif target_total == 4500:
         targets_per_language = {
             "python": 1000,
             "go": 600,
@@ -614,10 +621,10 @@ def compile_hybrid_dataset(
                 "rust": q,
             }
     else:
-        # Scale proportionally to 4500 (Python: 10/45, Go: 6/45, TS: 11/45, Rust: 18/45)
-        scale_f = target_total / 4500.0
+        # Scale proportionally to 4900 (Python: 10/49, Go: 10/49, TS: 11/49, Rust: 18/49)
+        scale_f = target_total / 4900.0
         py_t = max(2, int(round(1000 * scale_f / 2) * 2))
-        go_t = max(2, int(round(600 * scale_f / 2) * 2))
+        go_t = max(2, int(round(1000 * scale_f / 2) * 2))
         ts_t = max(2, int(round(1100 * scale_f / 2) * 2))
         rust_t = max(2, target_total - (py_t + go_t + ts_t))
         targets_per_language = {
@@ -691,7 +698,7 @@ def compile_hybrid_dataset(
         if needed > 0:
             if gen is None:
                 gen = DatasetGenerator(languages=TIER1_LANGUAGES, seed=seed, filter_symbolic_gate=True)
-            cpt = max(1, (needed + 3) // 4)
+            cpt = max(1, (needed + 4) // 5 if lang == "go" else (needed + 3) // 4)
             if lang == "python":
                 syn = gen.generate_targeted_python_mutations(count_per_type=cpt)
             elif lang == "go":
@@ -738,7 +745,7 @@ def compile_v3_datasets(
     scale: str = "both",
     medium_total: int = 5000,
     full_total: int = 10000,
-    hybrid_total: int = 4500,
+    hybrid_total: int = 4900,
     val_ratio: float = 0.2,
     data_dir: Optional[Path] = None,
     seed: int = 42,
@@ -748,7 +755,7 @@ def compile_v3_datasets(
     Main compilation workflow executing the compilation pipelines:
     - medium: v3-medium (5,000 samples)
     - full: v3-full (10,000 samples)
-    - hybrid: Golden Hybrid (4,500 samples)
+    - hybrid: Golden Hybrid (4,900 samples)
     - both: medium and full
     - all: medium, full, and hybrid
     """
@@ -870,8 +877,8 @@ def main():
     parser.add_argument(
         "--hybrid-total",
         type=int,
-        default=4500,
-        help="Target total sample count for v3-hybrid (default: 4500).",
+        default=4900,
+        help="Target total sample count for v3-hybrid (default: 4900).",
     )
     parser.add_argument(
         "--medium-total",

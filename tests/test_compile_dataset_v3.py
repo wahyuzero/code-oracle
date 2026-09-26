@@ -131,38 +131,38 @@ def test_v3_full_files_exist():
 
 
 def test_v3_hybrid_sample_counts_and_balance():
-    """Verify v3-hybrid has exact counts (3,600 train, 900 val, 4,500 total) and 50/50 balance."""
+    """Verify v3-hybrid has exact counts (3,920 train, 980 val, 4,900 total) and 50/50 balance."""
     train_recs = load_jsonl(HYBRID_DIR / "dataset_train.jsonl")
     val_recs = load_jsonl(HYBRID_DIR / "dataset_val.jsonl")
 
-    assert len(train_recs) == 3600
-    assert len(val_recs) == 900
-    assert len(train_recs) + len(val_recs) == 4500
+    assert len(train_recs) == 3920
+    assert len(val_recs) == 980
+    assert len(train_recs) + len(val_recs) == 4900
 
     # 50/50 overall balance
     train_pass = sum(1 for r in train_recs if r["label"] == 1)
     train_reject = sum(1 for r in train_recs if r["label"] == 0)
-    assert train_pass == 1800
-    assert train_reject == 1800
+    assert train_pass == 1960
+    assert train_reject == 1960
 
     val_pass = sum(1 for r in val_recs if r["label"] == 1)
     val_reject = sum(1 for r in val_recs if r["label"] == 0)
-    assert val_pass == 450
-    assert val_reject == 450
+    assert val_pass == 490
+    assert val_reject == 490
 
     # Expected per-language distribution (Golden Hybrid Configuration):
-    # Total: Python=1000, Go=600, TS=1100, Rust=1800
-    # Train (80%): Python=800 (400P/400R), Go=480 (240P/240R), TS=880 (440P/440R), Rust=1440 (720P/720R)
-    # Val (20%): Python=200 (100P/100R), Go=120 (60P/60R), TS=220 (110P/110R), Rust=360 (180P/180R)
+    # Total: Python=1000, Go=1000, TS=1100, Rust=1800
+    # Train (80%): Python=800 (400P/400R), Go=800 (400P/400R), TS=880 (440P/440R), Rust=1440 (720P/720R)
+    # Val (20%): Python=200 (100P/100R), Go=200 (100P/100R), TS=220 (110P/110R), Rust=360 (180P/180R)
     expected_train = {
         "python": (800, 400, 400),
-        "go": (480, 240, 240),
+        "go": (800, 400, 400),
         "typescript": (880, 440, 440),
         "rust": (1440, 720, 720),
     }
     expected_val = {
         "python": (200, 100, 100),
-        "go": (120, 60, 60),
+        "go": (200, 100, 100),
         "typescript": (220, 110, 110),
         "rust": (360, 180, 180),
     }

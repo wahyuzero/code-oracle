@@ -2373,6 +2373,807 @@ TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
                 "}\n"
             ),
         },
+        {
+            "name": "go_ignored_error_service",
+            "files": {
+                "account.go": (
+                    "package main\n\n"
+                    "import \"errors\"\n\n"
+                    "type Account struct {\n"
+                    "    ID      string\n"
+                    "    Balance int\n"
+                    "}\n\n"
+                    "func Deduct(acc *Account, amount int) error {\n"
+                    "    if acc.Balance < amount {\n"
+                    "        return errors.New(\"insufficient balance\")\n"
+                    "    }\n"
+                    "    acc.Balance -= amount\n"
+                    "    return nil\n"
+                    "}\n\n"
+                    "func TransferFunds(acc *Account, amount int) error {\n"
+                    "    err := Deduct(acc, amount)\n"
+                    "    if err != nil {\n"
+                    "        return err\n"
+                    "    }\n"
+                    "    return nil\n"
+                    "}\n"
+                ),
+                "service.go": (
+                    "package main\n\n"
+                    "func ProcessTransaction(acc *Account, amount int) error {\n"
+                    "    return TransferFunds(acc, amount)\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "account.go",
+            "target_symbol": "TransferFunds",
+            "caller_file": "service.go",
+            "caller_symbol": "ProcessTransaction",
+            "pass_patch": (
+                "package main\n\n"
+                "import \"errors\"\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func Deduct(acc *Account, amount int) error {\n"
+                "    if acc.Balance < amount {\n"
+                "        return errors.New(\"insufficient balance\")\n"
+                "    }\n"
+                "    acc.Balance -= amount\n"
+                "    return nil\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int) error {\n"
+                "    // Verified transfer with explicit error checking\n"
+                "    if err := Deduct(acc, amount); err != nil {\n"
+                "        return err\n"
+                "    }\n"
+                "    return nil\n"
+                "}\n"
+            ),
+            "go_ignored_error_patch": (
+                "package main\n\n"
+                "import \"errors\"\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func Deduct(acc *Account, amount int) error {\n"
+                "    if acc.Balance < amount {\n"
+                "        return errors.New(\"insufficient balance\")\n"
+                "    }\n"
+                "    acc.Balance -= amount\n"
+                "    return nil\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int) error {\n"
+                "    err := Deduct(acc, amount)\n"
+                "    _ = err // Ignored / shadowed error: proceeds without nil check\n"
+                "    return nil\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int, force bool) error {\n"
+                "    return nil\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func ProcessTransaction(acc *Account, amount int) error {\n"
+                "    return TransferFunds(acc, amount, true)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int) error {\n"
+                "    return ProcessTransaction(acc, amount)\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "import \"errors\"\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func Deduct(acc *Account, amount int) error {\n"
+                "    if acc.Balance < amount {\n"
+                "        return errors.New(\"insufficient balance\")\n"
+                "    }\n"
+                "    acc.Balance -= amount\n"
+                "    return nil\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int) error {\n"
+                "    err := Deduct(acc, amount)\n"
+                "    _ = err\n"
+                "    return nil\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "import \"os/exec\"\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int) error {\n"
+                "    exec.Command(\"sh\", \"-c\", \"echo audit\").Run()\n"
+                "    return nil\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "var globalAccCounter int\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int) error {\n"
+                "    go func() {\n"
+                "        globalAccCounter += amount\n"
+                "    }()\n"
+                "    return nil\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int) error {\n"
+                "    for i := 0; i < 300; i++ {\n"
+                "        _ = i\n"
+                "    }\n"
+                "    return nil\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "type Account struct {\n"
+                "    ID      string\n"
+                "    Balance int\n"
+                "}\n\n"
+                "func TransferFunds(acc *Account, amount int) error {\n"
+                "    return nil\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "go_inverted_defer_service",
+            "files": {
+                "client.go": (
+                    "package main\n\n"
+                    "import (\n"
+                    "    \"errors\"\n"
+                    "    \"io\"\n"
+                    ")\n\n"
+                    "type MockResponse struct {\n"
+                    "    Body io.ReadCloser\n"
+                    "}\n\n"
+                    "func FetchRaw(url string) (*MockResponse, error) {\n"
+                    "    if url == \"\" {\n"
+                    "        return nil, errors.New(\"empty url\")\n"
+                    "    }\n"
+                    "    return &MockResponse{Body: nil}, nil\n"
+                    "}\n\n"
+                    "func FetchPayload(url string) (int, error) {\n"
+                    "    resp, err := FetchRaw(url)\n"
+                    "    if err != nil {\n"
+                    "        return 0, err\n"
+                    "    }\n"
+                    "    if resp != nil && resp.Body != nil {\n"
+                    "        defer resp.Body.Close()\n"
+                    "    }\n"
+                    "    return 200, nil\n"
+                    "}\n"
+                ),
+                "fetcher.go": (
+                    "package main\n\n"
+                    "func ExecuteFetch(target string) (int, error) {\n"
+                    "    return FetchPayload(target)\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "client.go",
+            "target_symbol": "FetchPayload",
+            "caller_file": "fetcher.go",
+            "caller_symbol": "ExecuteFetch",
+            "pass_patch": (
+                "package main\n\n"
+                "import (\n"
+                "    \"errors\"\n"
+                "    \"io\"\n"
+                ")\n\n"
+                "type MockResponse struct {\n"
+                "    Body io.ReadCloser\n"
+                "}\n\n"
+                "func FetchRaw(url string) (*MockResponse, error) {\n"
+                "    if url == \"\" {\n"
+                "        return nil, errors.New(\"empty url\")\n"
+                "    }\n"
+                "    return &MockResponse{Body: nil}, nil\n"
+                "}\n\n"
+                "func FetchPayload(url string) (int, error) {\n"
+                "    // Correct defer order: verify err before deferring Close\n"
+                "    resp, err := FetchRaw(url)\n"
+                "    if err != nil {\n"
+                "        return 0, err\n"
+                "    }\n"
+                "    if resp.Body != nil {\n"
+                "        defer resp.Body.Close()\n"
+                "    }\n"
+                "    return 200, nil\n"
+                "}\n"
+            ),
+            "go_inverted_defer_patch": (
+                "package main\n\n"
+                "import (\n"
+                "    \"errors\"\n"
+                "    \"io\"\n"
+                ")\n\n"
+                "type MockResponse struct {\n"
+                "    Body io.ReadCloser\n"
+                "}\n\n"
+                "func FetchRaw(url string) (*MockResponse, error) {\n"
+                "    if url == \"\" {\n"
+                "        return nil, errors.New(\"empty url\")\n"
+                "    }\n"
+                "    return &MockResponse{Body: nil}, nil\n"
+                "}\n\n"
+                "func FetchPayload(url string) (int, error) {\n"
+                "    resp, err := FetchRaw(url)\n"
+                "    defer resp.Body.Close() // Inverted defer order placed before err != nil check\n"
+                "    if err != nil {\n"
+                "        return 0, err\n"
+                "    }\n"
+                "    return 200, nil\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "func FetchPayload(url string, timeout int) (int, error) {\n"
+                "    return timeout, nil\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func ExecuteFetch(target string) (int, error) {\n"
+                "    return FetchPayload(target, 50, 100)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "func FetchPayload(url string) (int, error) {\n"
+                "    return ExecuteFetch(url)\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "func DummyFetch() int {\n"
+                "    return 0\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "import (\n"
+                "    \"errors\"\n"
+                "    \"io\"\n"
+                ")\n\n"
+                "type MockResponse struct {\n"
+                "    Body io.ReadCloser\n"
+                "}\n\n"
+                "func FetchRaw(url string) (*MockResponse, error) {\n"
+                "    if url == \"\" {\n"
+                "        return nil, errors.New(\"empty url\")\n"
+                "    }\n"
+                "    return &MockResponse{Body: nil}, nil\n"
+                "}\n\n"
+                "func FetchPayload(url string) (int, error) {\n"
+                "    resp, err := FetchRaw(url)\n"
+                "    defer resp.Body.Close()\n"
+                "    if err != nil {\n"
+                "        return 0, err\n"
+                "    }\n"
+                "    return 200, nil\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "func FetchPayload(url string) (int, error) {\n"
+                "    return -1, nil\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "import \"os/exec\"\n\n"
+                "func FetchPayload(url string) (int, error) {\n"
+                "    exec.Command(\"curl\", url).Run()\n"
+                "    return 200, nil\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "var fetchCounter int\n\n"
+                "func FetchPayload(url string) (int, error) {\n"
+                "    go func() {\n"
+                "        fetchCounter++\n"
+                "    }()\n"
+                "    return 200, nil\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "func FetchPayload(url string) (int, error) {\n"
+                "    return 500, nil\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "go_receiver_drift_service",
+            "files": {
+                "session.go": (
+                    "package main\n\n"
+                    "type SessionService struct {\n"
+                    "    Token  string\n"
+                    "    Expiry int64\n"
+                    "}\n\n"
+                    "func (s *SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                    "    s.Token = tok\n"
+                    "    s.Expiry = exp\n"
+                    "    return true\n"
+                    "}\n"
+                ),
+                "manager.go": (
+                    "package main\n\n"
+                    "func RenewSession(s *SessionService, tok string, exp int64) bool {\n"
+                    "    return s.UpdateToken(tok, exp)\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "session.go",
+            "target_symbol": "UpdateToken",
+            "caller_file": "manager.go",
+            "caller_symbol": "RenewSession",
+            "pass_patch": (
+                "package main\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s *SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                "    // Correct pointer receiver mutates caller state\n"
+                "    if tok == \"\" {\n"
+                "        return false\n"
+                "    }\n"
+                "    s.Token = tok\n"
+                "    s.Expiry = exp\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "go_receiver_drift_patch": (
+                "package main\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                "    // Value receiver drift: s is a copy, mutations silently discarded\n"
+                "    s.Token = tok\n"
+                "    s.Expiry = exp\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s *SessionService) UpdateToken(tok string, exp int64, force bool) bool {\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func RenewSession(s *SessionService, tok string, exp int64) bool {\n"
+                "    return s.UpdateToken(tok, exp, true, false)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s *SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                "    return RenewSession(s, tok, exp)\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                "    s.Token = tok\n"
+                "    s.Expiry = exp\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "import \"os/exec\"\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s *SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                "    exec.Command(\"sh\", \"-c\", \"echo token\").Run()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "var sessionCounter int\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s *SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                "    go func() {\n"
+                "        sessionCounter++\n"
+                "    }()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s *SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                "    for i := 0; i < 300; i++ {\n"
+                "        _ = i\n"
+                "    }\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "type SessionService struct {\n"
+                "    Token  string\n"
+                "    Expiry int64\n"
+                "}\n\n"
+                "func (s *SessionService) UpdateToken(tok string, exp int64) bool {\n"
+                "    return false\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "go_channel_leak_service",
+            "files": {
+                "pipeline.go": (
+                    "package main\n\n"
+                    "type TaskPipeline struct {\n"
+                    "    BufferSize int\n"
+                    "}\n\n"
+                    "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                    "    ch := make(chan int, 1)\n"
+                    "    select {\n"
+                    "    case ch <- taskID:\n"
+                    "        return true\n"
+                    "    default:\n"
+                    "        return false\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                "worker.go": (
+                    "package main\n\n"
+                    "func ProcessBatch(p *TaskPipeline, taskID int) bool {\n"
+                    "    return p.SubmitTask(taskID)\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "pipeline.go",
+            "target_symbol": "SubmitTask",
+            "caller_file": "worker.go",
+            "caller_symbol": "ProcessBatch",
+            "pass_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                "    // Non-blocking buffered submit with fallback\n"
+                "    ch := make(chan int, 1)\n"
+                "    select {\n"
+                "    case ch <- taskID:\n"
+                "        return true\n"
+                "    default:\n"
+                "        return false\n"
+                "    }\n"
+                "}\n"
+            ),
+            "go_channel_leak_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                "    // Goroutine and unbuffered channel leak/deadlock without receiver or select timeout\n"
+                "    unbuf := make(chan int)\n"
+                "    go func() {\n"
+                "        unbuf <- taskID\n"
+                "    }()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int, urgent bool) bool {\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func ProcessBatch(p *TaskPipeline, taskID int) bool {\n"
+                "    return p.SubmitTask(taskID, true, false)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                "    return ProcessBatch(p, taskID)\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                "    unbuf := make(chan int)\n"
+                "    go func() {\n"
+                "        unbuf <- taskID\n"
+                "    }()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                "    return false\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "import \"os/exec\"\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                "    exec.Command(\"sh\", \"-c\", \"echo submit\").Run()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                "    for i := 0; i < 300; i++ {\n"
+                "        _ = i\n"
+                "    }\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "type TaskPipeline struct {\n"
+                "    BufferSize int\n"
+                "}\n\n"
+                "func (p *TaskPipeline) SubmitTask(taskID int) bool {\n"
+                "    return false\n"
+                "}\n"
+            ),
+        },
+        {
+            "name": "go_mutex_unlock_service",
+            "files": {
+                "cache.go": (
+                    "package main\n\n"
+                    "import \"sync\"\n\n"
+                    "type SafeCache struct {\n"
+                    "    mu    sync.Mutex\n"
+                    "    store map[string]string\n"
+                    "}\n\n"
+                    "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                    "    c.mu.Lock()\n"
+                    "    defer c.mu.Unlock()\n"
+                    "    if key == \"\" {\n"
+                    "        return false\n"
+                    "    }\n"
+                    "    c.store[key] = val\n"
+                    "    return true\n"
+                    "}\n"
+                ),
+                "client.go": (
+                    "package main\n\n"
+                    "func WriteCache(c *SafeCache, key string, val string) bool {\n"
+                    "    return c.SetItem(key, val)\n"
+                    "}\n"
+                ),
+            },
+            "target_file": "cache.go",
+            "target_symbol": "SetItem",
+            "caller_file": "client.go",
+            "caller_symbol": "WriteCache",
+            "pass_patch": (
+                "package main\n\n"
+                "import \"sync\"\n\n"
+                "type SafeCache struct {\n"
+                "    mu    sync.Mutex\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                "    // Safe mutex locking with deferred unlock\n"
+                "    c.mu.Lock()\n"
+                "    defer c.mu.Unlock()\n"
+                "    if key == \"\" {\n"
+                "        return false\n"
+                "    }\n"
+                "    c.store[key] = val\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "go_mutex_unlock_patch": (
+                "package main\n\n"
+                "import \"sync\"\n\n"
+                "type SafeCache struct {\n"
+                "    mu    sync.Mutex\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                "    c.mu.Lock()\n"
+                "    if key == \"\" {\n"
+                "        // Mutex unlock omission on early return: causes permanent deadlock on next call\n"
+                "        return false\n"
+                "    }\n"
+                "    c.store[key] = val\n"
+                "    c.mu.Unlock()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "arity_patch": (
+                "package main\n\n"
+                "type SafeCache struct {\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string, overwrite bool) bool {\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "keyword_patch": (
+                "package main\n\n"
+                "func WriteCache(c *SafeCache, key string, val string) bool {\n"
+                "    return c.SetItem(key, val, true, false)\n"
+                "}\n"
+            ),
+            "circular_patch": (
+                "package main\n\n"
+                "type SafeCache struct {\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                "    return WriteCache(c, key, val)\n"
+                "}\n"
+            ),
+            "deleted_patch": (
+                "package main\n\n"
+                "type SafeCache struct {\n"
+                "    store map[string]string\n"
+                "}\n"
+            ),
+            "concurrency_hazard_patch": (
+                "package main\n\n"
+                "import \"sync\"\n\n"
+                "type SafeCache struct {\n"
+                "    mu    sync.Mutex\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                "    c.mu.Lock()\n"
+                "    if key == \"\" {\n"
+                "        return false\n"
+                "    }\n"
+                "    c.store[key] = val\n"
+                "    c.mu.Unlock()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "silent_logic_drift_patch": (
+                "package main\n\n"
+                "type SafeCache struct {\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                "    return false\n"
+                "}\n"
+            ),
+            "security_surface_patch": (
+                "package main\n\n"
+                "import \"os/exec\"\n\n"
+                "type SafeCache struct {\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                "    exec.Command(\"sh\", \"-c\", \"echo cache\").Run()\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "performance_regression_patch": (
+                "package main\n\n"
+                "type SafeCache struct {\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                "    for i := 0; i < 300; i++ {\n"
+                "        _ = i\n"
+                "    }\n"
+                "    return true\n"
+                "}\n"
+            ),
+            "breaking_public_api_patch": (
+                "package main\n\n"
+                "type SafeCache struct {\n"
+                "    store map[string]string\n"
+                "}\n\n"
+                "func (c *SafeCache) SetItem(key string, val string) bool {\n"
+                "    return false\n"
+                "}\n"
+            ),
+        },
     ],
     "rust": [
         {
@@ -3241,15 +4042,17 @@ TARGETED_MUTATIONS_MAP: Dict[str, Tuple[str, str, str]] = {
     "py_truthiness_service": ("py_truthiness_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
     # d) Revert-mimicking subtle patches (inverts security sanitization hotfix)
     "py_revert_mimic_service": ("py_revert_mimic_patch", "real_revert", "SecuritySurface"),
-    # Go Targeted Subtle Mutations
-    # a) Channel race / goroutine concurrency hazard
-    "go_channel_service": ("go_channel_leak_patch", "concurrency_hazard", "ConcurrencyHazard"),
-    # b) Defer resource cleanup omission / descriptor leak
-    "go_resource_service": ("go_resource_leak_patch", "performance_regression", "PerformanceRegression"),
-    # c) Nil interface / err condition logic drift
-    "go_truthiness_service": ("go_truthiness_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
-    # d) Public struct/interface API breaking alteration
-    "go_api_service": ("go_api_drift_patch", "breaking_public_api", "BreakingPublicAPI"),
+    # Go Targeted Subtle Mutations (5 Idiomatic Semantic Mutation Generators)
+    # a) Ignored / Shadowed Error
+    "go_ignored_error_service": ("go_ignored_error_patch", "silent_logic_drift", "SilentLogicDrift"),
+    # b) Inverted Defer Order
+    "go_inverted_defer_service": ("go_inverted_defer_patch", "performance_regression", "PerformanceRegression"),
+    # c) Pointer vs Value Receiver Drift
+    "go_receiver_drift_service": ("go_receiver_drift_patch", "silent_logic_drift", "SilentLogicDrift"),
+    # d) Goroutine & Unbuffered Channel Leak/Deadlock
+    "go_channel_leak_service": ("go_channel_leak_patch", "concurrency_hazard", "ConcurrencyHazard"),
+    # e) Mutex Unlock Omission on early branch return
+    "go_mutex_unlock_service": ("go_mutex_unlock_patch", "concurrency_hazard", "ConcurrencyHazard"),
     # Rust Targeted Subtle Mutations
     # a) Mutex / lock ordering concurrency hazard
     "rust_concurrency_service": ("rust_concurrency_hazard_patch", "concurrency_hazard", "ConcurrencyHazard"),
@@ -3505,10 +4308,11 @@ class DatasetGenerator:
     ) -> List[DatasetRecord]:
         """
         Generate targeted subtle mutations for Go covering:
-        a) Channel race / goroutine concurrency hazard (go_channel_service)
-        b) Defer resource cleanup omission / descriptor leak (go_resource_service)
-        c) Nil check / truthiness drift (go_truthiness_service)
-        d) Public method / API signature drift (go_api_service)
+        a) Ignored / Shadowed Error (go_ignored_error_service)
+        b) Inverted Defer Order (go_inverted_defer_service)
+        c) Pointer vs Value Receiver Drift (go_receiver_drift_service)
+        d) Goroutine & Unbuffered Channel Leak/Deadlock (go_channel_leak_service)
+        e) Mutex Unlock Omission on early branch return (go_mutex_unlock_service)
         100% compliant with Stage 1-2 symbolic gate (symbolic_gate_passed=True).
         """
         go_templates = [

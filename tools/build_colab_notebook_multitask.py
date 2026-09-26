@@ -43,13 +43,13 @@ b64_full = base64.b64encode(FULL_ZIP.read_bytes()).decode("utf-8") if FULL_ZIP.e
 def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
     """
     Generate notebook cells for the given variant:
-    - 'hybrid': self-contained v3-hybrid golden (~4,500 samples)
+    - 'hybrid': self-contained v3-hybrid golden (~4,900 samples)
     - 'medium': self-contained v3-medium (5,000 samples)
     - 'full': self-contained v3-full (10,000 samples)
     - 'base': unified with toggle between v3_hybrid, v3_medium, and v3_full
     """
     title_suffix = (
-        "v3 Hybrid Golden (~4,500 Samples)"
+        "v3 Hybrid Golden (~4,900 Samples)"
         if variant == "hybrid"
         else (
             "v3 Medium (5,000 Samples)"
@@ -227,7 +227,7 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
             "DATA_DIR.mkdir(parents=True, exist_ok=True)",
             "",
             "#@title 📦 Dataset Variant Selection",
-            "# Choose between Golden Hybrid (v3-hybrid: ~4,500 samples), Medium Scale (v3-medium: 5,000 samples), or Full Scale (v3-full: 10,000 samples)",
+            "# Choose between Golden Hybrid (v3-hybrid: ~4,900 samples), Medium Scale (v3-medium: 5,000 samples), or Full Scale (v3-full: 10,000 samples)",
             'DATASET_VARIANT = "v3_hybrid" #@param ["v3_hybrid", "v3_medium", "v3_full"]',
             "",
             f'EMBEDDED_ZIP_B64_HYBRID = "{b64_hybrid}"',

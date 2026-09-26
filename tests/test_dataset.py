@@ -743,6 +743,47 @@ def test_targeted_python_mutation_generators():
     assert found_symbols == py_symbols, f"Missing targeted Python templates: {py_symbols - found_symbols}"
 
 
+def test_targeted_go_mutation_generators():
+    """Verify 5 idiomatic targeted subtle mutation generators for Go."""
+    from code_oracle.linearizer import estimate_tokens
+
+    gen = DatasetGenerator(languages=["go"], seed=42)
+    records = gen.generate_targeted_go_mutations(count_per_type=1)
+
+    assert len(records) == 10  # 5 templates x (1 pass + 1 subtle mutation)
+
+    negatives = [r for r in records if r.label == 0]
+    positives = [r for r in records if r.label == 1]
+    assert len(negatives) == 5
+    assert len(positives) == 5
+
+    # 1. 100% symbolic gate compliance (symbolic_gate_passed=True)
+    for r in records:
+        assert r.language == "go"
+        assert r.symbolic_gate_passed is True
+        assert "STATUS: APPROVED" in r.input_dsl
+        assert estimate_tokens(r.input_dsl) <= 400
+
+    # 2. Verify all 3 ADR-0003 targeted failure categories are covered in negative records
+    neg_categories = {r.category for r in negatives}
+    assert "silent_logic_drift" in neg_categories
+    assert "performance_regression" in neg_categories
+    assert "concurrency_hazard" in neg_categories
+
+    # 3. Verify risk taxonomy activations
+    has_drift = any(r.taxonomy_labels.get("SilentLogicDrift", 0.0) >= 0.8 for r in negatives)
+    has_perf = any(r.taxonomy_labels.get("PerformanceRegression", 0.0) >= 0.8 for r in negatives)
+    has_conc = any(r.taxonomy_labels.get("ConcurrencyHazard", 0.0) >= 0.8 for r in negatives)
+    assert has_drift, "Expected SilentLogicDrift taxonomy for ignored error / receiver drift"
+    assert has_perf, "Expected PerformanceRegression taxonomy for inverted defer"
+    assert has_conc, "Expected ConcurrencyHazard taxonomy for channel leak / mutex unlock omission"
+
+    # 4. Verify all 5 specific targeted templates are represented
+    go_symbols = {"TransferFunds", "FetchPayload", "UpdateToken", "SubmitTask", "SetItem"}
+    found_symbols = {sym for sym in go_symbols if any(sym in r.input_dsl for r in negatives)}
+    assert found_symbols == go_symbols, f"Missing targeted Go templates: {go_symbols - found_symbols}"
+
+
 def test_targeted_dataset_expansion_integrity():
     """Verify expand_dataset preserves exact class balance and 100% symbolic gate compliance across languages."""
     gen = DatasetGenerator(languages=["typescript", "python"], seed=42)
@@ -806,6 +847,10 @@ def test_targeted_mutations_cli_dispatch():
     py_only = gen.generate_targeted_mutations(languages=["python"], count_per_type=1)
     assert all(r.language == "python" for r in py_only)
     assert len(py_only) == 8
+
+    go_only = gen.generate_targeted_mutations(languages=["go"], count_per_type=1)
+    assert all(r.language == "go" for r in go_only)
+    assert len(go_only) == 10
 
 
 def test_targeted_cli_execution():
