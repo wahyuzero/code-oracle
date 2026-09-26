@@ -330,6 +330,7 @@ def generate_notebook_cells(variant: str = "base") -> List[Dict[str, Any]]:
                 "            'confidence': confidence,",
                 "        }",
                 "",
+                'device = torch.device("cuda" if torch.cuda.is_available() else "cpu")',
                 "model = ModernBERTMultiTaskModel(MODEL_ID).to(device)",
                 "total_params = sum(p.numel() for p in model.parameters())",
                 'print(f"[✓] ModernBERT Multi-Task Model initialized on {device}!")',
