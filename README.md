@@ -1,7 +1,7 @@
 # Code Oracle
 
 > Sub-50ms neuro-symbolic verification for AI coding agents.  
-> Structural AST topology validated by Tarjan SCC and a non-autoregressive decision model (Laya).
+> Structural AST topology validated by Tarjan SCC and Tyranid-BERT (164M INT8 decision model).
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Inference Latency](https://img.shields.io/badge/Verification-<50ms_local-brightgreen.svg)](#key-characteristics)
@@ -24,7 +24,7 @@ When coding agents (Claude Code, Cursor, OpenCode, Codex) inspect code modificat
 
 Code Oracle decouples code generation from verification. It runs locally as an independent evaluation layer.
 
-Instead of generating conversational critiques, Code Oracle constructs a localized AST graph using Tree-sitter, checks topological invariants symbolically, and evaluates residual drift using Laya (a 421M parameter ModernBERT decision model).
+Instead of generating conversational critiques, Code Oracle constructs a localized AST graph using Tree-sitter, checks topological invariants symbolically, and evaluates residual drift using Tyranid-BERT (a 164M parameter ModernBERT multi-task decision model quantized to INT8).
 
 ### Verification Pipeline
 
@@ -32,7 +32,7 @@ Instead of generating conversational critiques, Code Oracle constructs a localiz
 flowchart TD
     Agent["🤖 AI Coding Agent / Developer<br/>(Claude Code, Cursor, Antigravity)"]
 
-    subgraph Engine ["⚡ CODE ORACLE ENGINE (&lt; 50ms)"]
+    subgraph Engine ["⚡ CODE ORACLE ENGINE (&lt; 20-50ms)"]
         direction TD
 
         Stage1["Stage 1: Tree-sitter &amp; k-Hop TopoSlice<br/>• Multi-language AST parsing (&lt; 8ms)<br/>• Extracts callers, callees &amp; interfaces<br/>• Isolates k-hop neighborhood graph"]
@@ -41,7 +41,7 @@ flowchart TD
 
         HardVeto["🚫 Hard Veto Early Exit (&lt; 25ms)<br/>Instant rejection on cycles &amp; signature drift"]
 
-        Stage3["🧠 Stage 3: Laya ModernBERT 421M Head<br/>• Evaluates linearized Micro-DSL subgraph<br/>• In-memory resident CPU inference<br/>• Calibrated continuous risk scoring (0.0 - 1.0)"]
+        Stage3["🧠 Stage 3: Tyranid-BERT 164M INT8 Head<br/>• Evaluates linearized Micro-DSL subgraph<br/>• Sub-20ms ONNX Runtime CPU inference<br/>• Multi-Task: Risk Regression, 5-Class Taxonomy &amp; Uncertainty"]
 
         Stage1 --> Stage2
         Stage2 -- "Cycle / Invariant Breach" --> HardVeto
@@ -83,16 +83,16 @@ Code Oracle operates within explicit technical boundaries:
 1. **Evaluator, Not Author:** Code Oracle does not generate, autocomplete, or refactor code. It evaluates proposed patches against existing syntax and topology.
 2. **Syntax Requirement:** Patches must produce a valid Tree-sitter AST. Syntactically invalid inputs fail at Stage 1 before invoking the decision model.
 3. **Static Topology Bounds:** Focuses on structural invariants, dependency cycles, and interface compatibility. It does not replace dynamic test suites, integration environments, or runtime race condition detectors.
-4. **Memory Footprint:** Requires approximately 1.2 GB of RAM to hold the 421M parameter model in memory for single-pass inference.
+4. **Memory Footprint:** Requires only ~150 MB of RAM for the INT8 quantized ONNX model, running on commodity CPUs with standalone `onnxruntime` (Zero-PyTorch dependency).
 
 ---
 
 ## Pretrained Model Weights
 
-The fine-tuned Laya ModernBERT 421M decision head weights are hosted on Hugging Face:  
-🤗 [**wxsys/code-oracle-laya-421m**](https://huggingface.co/wxsys/code-oracle-laya-421m)
+The fine-tuned **Tyranid-BERT (164M INT8)** multi-task decision head weights are hosted on Hugging Face:  
+🤗 [**wxsys/tyranid-bert**](https://huggingface.co/wxsys/tyranid-bert)
 
-Code Oracle automatically downloads and caches these weights to `~/.cache/code_oracle/weights/` on first invocation when `--neural` is enabled, or reads from local `./weights/` if present.
+Code Oracle automatically downloads and caches these weights to `~/.cache/code_oracle/weights/` on first invocation when `--neural` is enabled, or reads from local `./weights_base/` if present.
 
 ---
 
@@ -101,20 +101,20 @@ Code Oracle automatically downloads and caches these weights to `~/.cache/code_o
 - [x] Architecture Specification & Subgraph Slicing Design
 - [x] TopoSlice AST Slicer & Incremental Workspace Indexer
 - [x] Tarjan's SCC Cycle Detector & Deterministic Symbolic Gate
-- [x] Persistent In-Memory Laya Decision Head & Fine-Tuned Weights (`wxsys/code-oracle-laya-421m`)
+- [x] Multi-Task Risk Taxonomy (5 Classes) & Epistemic Uncertainty Estimation (ADR-0003)
+- [x] Embedded Dead Code Semantics Classifier with ModernBERT Representations
+- [x] Standalone ONNX Runtime Inference & Dynamic INT8 Quantization (`code-oracle export-onnx`)
+- [x] Tyranid-BERT Official Model Release ([`wxsys/tyranid-bert`](https://huggingface.co/wxsys/tyranid-bert))
+- [x] Golden Hybrid v3 Multi-Language Dataset (~4,900 balanced samples across Go, Python, TypeScript, Rust)
 - [x] Lean FastMCP Server interface (`verify_patch`)
 - [x] Agentic `SKILL.md` distribution for Claude Code, Cursor, and Antigravity
 - [x] Git pre-commit & pre-push verification hook with unblock toggle (`code-oracle hook`)
 - [x] Multi-language AST extractors for Tier 1 languages (Python, TypeScript, Go, Rust)
-- [x] Synthetic mutation and training dataset mining engine (`tools/mine_top_repos.py`)
-- [x] Google Colab Multi-Language Fine-Tuning Pipeline (`notebooks/Laya_Code_Oracle_Finetune.ipynb`)
-- [x] CPU Thread Auto-Tuning & Hybrid Neuro-Symbolic Latency Optimization
 - [x] Dead Code & Orphan Symbol Scanner (`code-oracle dead-code` via 0-in-degree graph reachability)
 - [x] Static Performance Anti-Patterns & Resource Leak Detector (`code-oracle perf-lint`: nested loop complexity, unclosed handles)
 - [ ] Official Git Tagging & GitHub Release pipeline (`v0.1.0`)
 - [ ] Python Package Wheel Distribution & PyPI Publishing (`pip install code-oracle`)
 - [ ] Multi-Agent Ecosystem Integrations (Claude Code, Cursor, Antigravity, OpenCode, and Cline sidecars)
-- [ ] *(Maybe / Experimental)* Synthetic User & Local Load Simulation Plugin (AST endpoint discovery + lightweight concurrent stress tester)
 
 ---
 

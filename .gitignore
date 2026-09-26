@@ -52,8 +52,13 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Jupyter Notebooks
+# Jupyter Notebooks (Kept locally, excluded from git push)
+*.ipynb
 .ipynb_checkpoints/
+
+# Local Prediction Caches & Diagnostic Dumps
+data/heldout_predictions_cache.json
+data/heldout_failures.json
 
 # Logs & Diagnostics
 *.log
