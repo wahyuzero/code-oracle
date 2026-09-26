@@ -40,8 +40,9 @@ WEIGHTS_BASE = REPO_ROOT / "weights_base"
 
 @pytest.fixture
 def sample_weights_dir():
-    """Ensure weights_base exists and return path."""
-    assert WEIGHTS_BASE.exists(), f"weights_base not found at {WEIGHTS_BASE}"
+    """Ensure weights_base exists and return path, skipping gracefully if weights are absent."""
+    if not WEIGHTS_BASE.exists():
+        pytest.skip(f"weights_base not found at {WEIGHTS_BASE}")
     return WEIGHTS_BASE
 
 

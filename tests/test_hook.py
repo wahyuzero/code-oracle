@@ -391,7 +391,7 @@ def test_hook_run_json_output(tmp_path: Path, capsys):
 
 def test_pre_commit_hooks_yaml_exists():
     """Verify that .pre-commit-hooks.yaml exists in repo root with proper configuration."""
-    yaml_path = Path("/home/wxsys/code-oracle/.pre-commit-hooks.yaml")
+    yaml_path = Path(__file__).resolve().parent.parent / ".pre-commit-hooks.yaml"
     assert yaml_path.exists()
     content = yaml_path.read_text(encoding="utf-8")
     assert "id: code-oracle" in content

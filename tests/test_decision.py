@@ -157,9 +157,33 @@ def test_tune_cpu_threads():
     assert 1 <= threads <= 8
 
 
-def test_enable_neural_head():
+def test_enable_neural_head(monkeypatch, tmp_path: Path):
     head = LayaDecisionHead(enabled=False)
     assert not head.is_neural_enabled
-    assert head.enable_neural_head()
-    assert head.is_neural_enabled
+
+    # When actual weights are discovered in the local environment
+    if head._resolve_weights_path(None) is not None:
+        assert head.enable_neural_head()
+        assert head.is_neural_enabled
+    else:
+        # Without weights, enable_neural_head gracefully returns False
+        assert not head.enable_neural_head()
+        assert not head.is_neural_enabled
+
+    # Test dynamic loading flow with configured weights path
+    dummy_dir = tmp_path / "weights"
+    dummy_dir.mkdir()
+    (dummy_dir / "model.onnx").write_text("dummy")
+    mock_head = LayaDecisionHead(enabled=False, weights_path=dummy_dir)
+    monkeypatch.setattr(
+        mock_head,
+        "_try_load_model",
+        lambda: (
+            setattr(mock_head, "_loaded", True),
+            setattr(mock_head, "onnx_session", MagicMock()),
+        ),
+    )
+    assert mock_head.enable_neural_head()
+    assert mock_head.is_neural_enabled
+
 

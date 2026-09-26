@@ -353,6 +353,7 @@ class LayaDecisionHead:
             if quantize_int8 is not None
             else os.environ.get("CODE_ORACLE_INT8", "1").lower() in ("1", "true", "yes")
         )
+        self._explicit_weights_path = weights_path
         self.weights_path = self._resolve_weights_path(weights_path) if enabled else None
         self.agent = None
         self.pytorch_multitask_model: Optional[Any] = None
@@ -625,7 +626,7 @@ class LayaDecisionHead:
         if not self._loaded:
             self.enabled = True
             if not self.weights_path:
-                self.weights_path = self._resolve_weights_path(None)
+                self.weights_path = self._resolve_weights_path(getattr(self, "_explicit_weights_path", None))
             if self.weights_path and self.weights_path.exists():
                 self._try_load_model()
         return self.is_neural_enabled
