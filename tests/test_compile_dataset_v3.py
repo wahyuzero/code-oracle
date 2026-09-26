@@ -180,6 +180,49 @@ def test_v3_hybrid_sample_counts_and_balance():
         assert sum(1 for rec in l_val if rec["label"] == 0) == r
 
 
+def test_v3_hybrid_go_semantic_mutations_coverage():
+    """Verify v3-hybrid dataset specifically covers all 5 idiomatic Go semantic mutations."""
+    train_recs = load_jsonl(HYBRID_DIR / "dataset_train.jsonl")
+    val_recs = load_jsonl(HYBRID_DIR / "dataset_val.jsonl")
+
+    all_go = [r for r in train_recs + val_recs if r["language"] == "go"]
+    assert len(all_go) == 1000  # 800 train + 200 val
+
+    # 1. 100% symbolic gate compliance and <= 400 token ceiling
+    for r in all_go:
+        assert r.get("symbolic_gate_passed") is True, f"Gate failed for Go record: {r}"
+        tok_len = estimate_tokens(r["input_dsl"])
+        assert 0 < tok_len <= 400, f"Token limit violated for Go record ({tok_len}): {r}"
+
+    # 2. Check representation of all 5 target symbols from the idiomatic mutation generators
+    expected_symbols = {
+        "TransferFunds",  # go_ignored_error_service
+        "FetchPayload",   # go_inverted_defer_service
+        "UpdateToken",    # go_receiver_drift_service
+        "SubmitTask",     # go_channel_leak_service
+        "SetItem",        # go_mutex_unlock_service
+    }
+    found_symbols = {sym for sym in expected_symbols if any(sym in r["input_dsl"] for r in all_go)}
+    assert found_symbols == expected_symbols, f"Missing Go symbols in hybrid dataset: {expected_symbols - found_symbols}"
+
+    # 3. Check ADR-0003 taxonomy coverage on negative Go records
+    go_negatives = [r for r in all_go if r["label"] == 0]
+    assert len(go_negatives) == 500  # 400 train + 100 val
+
+    has_drift = any(r["taxonomy_labels"].get("SilentLogicDrift", 0.0) >= 0.8 for r in go_negatives)
+    has_perf = any(r["taxonomy_labels"].get("PerformanceRegression", 0.0) >= 0.8 for r in go_negatives)
+    has_conc = any(r["taxonomy_labels"].get("ConcurrencyHazard", 0.0) >= 0.8 for r in go_negatives)
+    assert has_drift, "Missing SilentLogicDrift in Go negative records"
+    assert has_perf, "Missing PerformanceRegression in Go negative records"
+    assert has_conc, "Missing ConcurrencyHazard in Go negative records"
+
+    # 4. Check category distribution in negative Go records
+    go_neg_categories = {r["category"] for r in go_negatives}
+    assert "silent_logic_drift" in go_neg_categories
+    assert "performance_regression" in go_neg_categories
+    assert "concurrency_hazard" in go_neg_categories
+
+
 def test_v3_medium_sample_counts_and_balance():
     """Verify v3-medium has exact counts and 50/50 balance across splits & languages."""
     train_recs = load_jsonl(MEDIUM_DIR / "dataset_train.jsonl")

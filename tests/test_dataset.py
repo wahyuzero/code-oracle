@@ -783,10 +783,18 @@ def test_targeted_go_mutation_generators():
     found_symbols = {sym for sym in go_symbols if any(sym in r.input_dsl for r in negatives)}
     assert found_symbols == go_symbols, f"Missing targeted Go templates: {go_symbols - found_symbols}"
 
+    # 5. Verify multi-variation generation (count_per_type > 1) maintains balance and symbolic gates
+    multi_records = gen.generate_targeted_go_mutations(count_per_type=2)
+    assert len(multi_records) == 20  # 5 templates x 2 cpt x 2 pairs
+    assert sum(1 for r in multi_records if r.label == 1) == 10
+    assert sum(1 for r in multi_records if r.label == 0) == 10
+    assert all(r.symbolic_gate_passed is True for r in multi_records)
+    assert all(estimate_tokens(r.input_dsl) <= 400 for r in multi_records)
+
 
 def test_targeted_dataset_expansion_integrity():
-    """Verify expand_dataset preserves exact class balance and 100% symbolic gate compliance across languages."""
-    gen = DatasetGenerator(languages=["typescript", "python"], seed=42)
+    """Verify expand_dataset preserves exact class balance and 100% symbolic gate compliance across languages including Go."""
+    gen = DatasetGenerator(languages=["typescript", "python", "go"], seed=42)
 
     # Initial small datasets (balanced)
     base_train = [
@@ -803,6 +811,7 @@ def test_targeted_dataset_expansion_integrity():
         val_records=base_val,
         num_ts_samples=16,
         num_py_samples=16,
+        num_go_samples=20,
         val_ratio=0.25,
     )
 
@@ -818,16 +827,20 @@ def test_targeted_dataset_expansion_integrity():
     # Verify 100% symbolic gate compliance
     assert all(r.symbolic_gate_passed is True for r in exp_train + exp_val)
 
-    # Verify BOTH TypeScript and Python have negative samples in train and val (no crowding out)
+    # Verify TypeScript, Python, and Go have negative samples in train and val (no crowding out)
     py_train_neg = sum(1 for r in exp_train if r.language == "python" and r.label == 0)
     ts_train_neg = sum(1 for r in exp_train if r.language == "typescript" and r.label == 0)
+    go_train_neg = sum(1 for r in exp_train if r.language == "go" and r.label == 0)
     assert py_train_neg > 1, f"Python negative samples missing in train: {py_train_neg}"
     assert ts_train_neg > 0, f"TypeScript negative samples missing in train: {ts_train_neg}"
+    assert go_train_neg > 0, f"Go negative samples missing in train: {go_train_neg}"
 
     py_val_neg = sum(1 for r in exp_val if r.language == "python" and r.label == 0)
     ts_val_neg = sum(1 for r in exp_val if r.language == "typescript" and r.label == 0)
+    go_val_neg = sum(1 for r in exp_val if r.language == "go" and r.label == 0)
     assert py_val_neg > 1, f"Python negative samples missing in val: {py_val_neg}"
     assert ts_val_neg > 0, f"TypeScript negative samples missing in val: {ts_val_neg}"
+    assert go_val_neg > 0, f"Go negative samples missing in val: {go_val_neg}"
 
 
 def test_targeted_mutations_cli_dispatch():
@@ -864,9 +877,9 @@ def test_targeted_cli_execution():
                 "code_oracle.dataset",
                 "--targeted",
                 "--languages",
-                "typescript,python",
+                "typescript,python,go",
                 "--num-samples",
-                "16",
+                "26",
                 "--output-dir",
                 str(tmp),
             ],
@@ -885,6 +898,7 @@ def test_targeted_cli_execution():
         assert all(r["symbolic_gate_passed"] is True for r in lines)
         assert any(r["language"] == "typescript" for r in lines)
         assert any(r["language"] == "python" for r in lines)
+        assert any(r["language"] == "go" for r in lines)
 
 
 

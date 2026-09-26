@@ -5276,7 +5276,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--filter-symbolic-gate", action="store_true", default=False, help="Filter mutations that fail symbolic gate.")
     parser.add_argument("--include-subtle", action="store_true", default=True, help="Include subtle mutations.")
     parser.add_argument("--no-subtle", dest="include_subtle", action="store_false", help="Disable subtle mutations.")
-    parser.add_argument("--targeted", action="store_true", default=False, help="Generate targeted subtle mutations for TypeScript and Python.")
+    parser.add_argument("--targeted", action="store_true", default=False, help="Generate targeted subtle mutations across Tier 1 languages (TypeScript, Python, Go, Rust).")
 
     args = parser.parse_args(argv)
     lang_list = [l.strip().lower() for l in args.languages.split(",") if l.strip()]
@@ -5291,9 +5291,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.targeted:
         print(f"[*] Generating targeted mutations for languages: {', '.join(lang_list)}...")
+        n_templates = sum(5 if l == "go" else 4 for l in lang_list)
         records = generator.generate_targeted_mutations(
             languages=lang_list,
-            count_per_type=max(1, (args.num_samples // 2) // (4 * max(1, len(lang_list)))),
+            count_per_type=max(1, (args.num_samples // 2) // max(1, n_templates)),
         )
         print(f"[+] Successfully generated {len(records)} targeted mutation records.")
         args.output_dir.mkdir(parents=True, exist_ok=True)

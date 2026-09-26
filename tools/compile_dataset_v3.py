@@ -393,8 +393,8 @@ def generate_targeted_semantic_mutations(
             continue
 
         # Each type generates 1 PASS + 1 REJECT per template
-        # 4 targeted templates per language -> 4 PASS + 4 REJECT per count_per_type
-        count_per_type = max(1, (target_count + 3) // 4)
+        # 5 templates for Go (5 PASS + 5 REJECT per cpt), 4 templates for others (4 PASS + 4 REJECT per cpt)
+        count_per_type = max(1, (target_count + 4) // 5 if lang == "go" else (target_count + 3) // 4)
 
         if lang == "typescript":
             lang_records = gen.generate_targeted_typescript_mutations(count_per_type=count_per_type)
